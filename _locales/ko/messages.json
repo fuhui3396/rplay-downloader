@@ -335,5 +335,107 @@
   },
   "drmRestoreFailed": {
     "message": "기본 제공 기기를 복원하지 못했습니다. 현재 기기는 유지됩니다. 확장 프로그램을 다시 로드한 후 재시도하세요."
+  },
+  "namingTitle": {
+    "message": "저장 및 이름 지정"
+  },
+  "namingHelp": {
+    "message": "다운로드 위치와 파일 이름 규칙을 설정합니다. yt-dlp 스타일 출력 템플릿을 지원합니다."
+  },
+  "namingFolder": {
+    "message": "기본 저장 폴더"
+  },
+  "namingFolderHint": {
+    "message": "브라우저 다운로드 폴더 아래의 하위 폴더입니다. 비우면 최상위입니다. 절대 경로는 허용되지 않습니다."
+  },
+  "namingTemplate": {
+    "message": "출력 템플릿"
+  },
+  "namingTemplateHint": {
+    "message": "%(title)s, %(id)s, %(channel)s, %(channel_id)s, %(upload_date)s, %(release_date)s, %(resolution)s, %(ext)s 지원. | 로 기본값, > 로 날짜 형식, .NB 로 바이트 자르기."
+  },
+  "namingPreview": {
+    "message": "미리보기"
+  },
+  "namingSaveMode": {
+    "message": "저장 방식"
+  },
+  "namingSaveFolder": {
+    "message": "기본 폴더에 바로 저장"
+  },
+  "namingSaveAsk": {
+    "message": "매번 저장 위치 묻기"
+  },
+  "namingReset": {
+    "message": "기본값으로 복원"
+  },
+  "namingSaved": {
+    "message": "저장됨"
+  },
+  "embyTitle": {
+    "message": "Emby 메타데이터"
+  },
+  "embyOptional": {
+    "message": "선택"
+  },
+  "embyHelp": {
+    "message": "동영상과 함께 NFO와 이미지를 생성하여 Emby / Jellyfin에서 바로 읽을 수 있게 합니다."
+  },
+  "embyEnable": {
+    "message": "Emby 메타데이터 생성"
+  },
+  "embyMediaType": {
+    "message": "미디어 유형"
+  },
+  "embyTypeTv": {
+    "message": "TV 시리즈"
+  },
+  "embyTypeMovie": {
+    "message": "영화"
+  },
+  "embyNfoEnable": {
+    "message": "NFO 파일 생성"
+  },
+  "embyImagesEnable": {
+    "message": "poster / fanart / thumb 이미지 다운로드"
+  },
+  "embyHint": {
+    "message": "포스터와 줄거리는 페이지의 Open Graph / JSON-LD에서 최대한 가져옵니다. 없는 항목은 생성하지 않습니다."
+  },
+  "namingDirectory": {
+    "message": "사용자 지정 저장 폴더"
+  },
+  "namingPickDirectory": {
+    "message": "폴더 선택…"
+  },
+  "namingClearDirectory": {
+    "message": "해제"
+  },
+  "namingDirectoryHint": {
+    "message": "지정하면 동영상과 NFO / 이미지를 이 폴더(다른 드라이브도 가능)에 직접 저장합니다. 브라우저 권한이 필요하며 재시작 후 다시 선택해야 할 수 있습니다."
+  },
+  "namingDirectoryNone": {
+    "message": "설정 안 됨 — 위의 기본 폴더를 사용합니다."
+  },
+  "namingDirectorySelected": {
+    "message": "현재 폴더: $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "Media/RPlay"
+      }
+    }
+  },
+  "namingDirectoryPermission": {
+    "message": "폴더 “$NAME$” 권한이 필요합니다. 다시 선택하세요.",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "Media/RPlay"
+      }
+    }
+  },
+  "namingDirectoryUnsupported": {
+    "message": "이 브라우저는 폴더 선택을 지원하지 않습니다. 위의 기본 폴더를 사용하세요."
   }
 }

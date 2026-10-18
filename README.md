@@ -14,6 +14,35 @@
 - 未关联清单的 CMAF 请求在当前页面合并为一条观察记录，不为每个分段新增卡片或弹出播放页通知；保留精确请求地址供清单关联，同一来源的页面通知去重。
 - 显示可用分辨率和码率，按需选择画质。
 - 支持 DASH 点播：解析 `BaseURL` / `SegmentBase` 完整轨道，以及 `SegmentTemplate` + `SegmentTimeline` 初始化段和编号分片（含 `$Number%09d$`）。按继承的时间刻度处理音视频各自的时间线，自动配对音频并保存为 MP4。Widevine CENC / CBCS 分片通过现有软件 CDM 授权并解密。
+- 自定义保存位置与命名：可设置默认保存文件夹，并用类似 yt-dlp 的输出模板自定义目录与文件名，或切换为每次询问保存位置。
+- 可选生成 Emby / Jellyfin 元数据：随视频保存 NFO（电影或剧集结构）以及 poster / fanart / thumb 图片。
+
+## 保存与命名
+
+在扩展的「选项」页面设置：
+
+- **默认保存文件夹**：浏览器「下载目录」下的相对子目录（留空为根目录）。受浏览器 API 限制，不能填写盘符或绝对路径；若开启“每次询问保存位置”，则每次下载时由浏览器弹出另存为对话框。
+- **自定义保存目录**：在选项页点击「选择文件夹」选中任意磁盘目录（可跨盘）后，视频与 NFO / 图片会由扩展直接写入该目录，不再经过浏览器下载。该功能基于 File System Access，需要浏览器授权，重启后如权限失效需重新选择；未选择或未授权时自动回退到默认保存文件夹。
+- **输出模板**：决定子目录和文件名，支持常用 yt-dlp 语法：
+  - `%(field)s` 字段值，缺失时为空；`%(field|默认值)s` 指定默认值。
+  - `%(date>%Y-%m-%d)s` 按格式输出日期；`%(a,b|默认)s` 取第一个非空字段。
+  - `%(title).100B` 按 UTF-8 字节截断，`%(title).100s` 按字符截断。
+  - 可用字段：`title`、`id`、`channel`、`channel_id`、`upload_date`、`release_date`、`resolution`、`width`、`height`、`duration`、`ext`。
+
+示例：
+
+```
+%(channel)s [%(channel_id|Unknown_id)s]/Season %(release_date>%Y,upload_date>%Y|Unknown)s/S%(release_date>%Y,upload_date>%Y)sE%(release_date>%m%d,upload_date>%m%d)s - %(title).100B [%(id)s].%(ext)s
+```
+
+## Emby 元数据
+
+开启后会在视频同目录生成：
+
+- `<视频名>.nfo`（剧集为 `episodedetails`，电影为 `movie`），剧集模式还会在系列目录生成 `tvshow.nfo`、在季目录生成 `season.nfo`。
+- `<视频名>-poster.jpg`、`<视频名>-fanart.jpg`、`<视频名>-thumb.jpg`。
+
+其中的频道、简介、上映日期与图片地址来自视频页的 Open Graph / JSON-LD / DOM 抓取；抓取不到的字段或图片会被跳过，不保证对所有页面都完整。
 
 ## 安装
 

@@ -335,5 +335,107 @@
   },
   "drmRestoreFailed": {
     "message": "同梱デバイスを復元できませんでした。現在のデバイスは変更されていません。拡張機能を再読み込みしてお試しください。"
+  },
+  "namingTitle": {
+    "message": "保存と命名"
+  },
+  "namingHelp": {
+    "message": "ダウンロード先とファイル名の規則を設定します。yt-dlp 風の出力テンプレートに対応。"
+  },
+  "namingFolder": {
+    "message": "既定の保存フォルダ"
+  },
+  "namingFolderHint": {
+    "message": "ブラウザの「ダウンロード」フォルダ内のサブフォルダ。空欄なら直下。絶対パスは使用できません。"
+  },
+  "namingTemplate": {
+    "message": "出力テンプレート"
+  },
+  "namingTemplateHint": {
+    "message": "%(title)s、%(id)s、%(channel)s、%(channel_id)s、%(upload_date)s、%(release_date)s、%(resolution)s、%(ext)s に対応。| で既定値、> で日付書式、.NB でバイト切り詰め。"
+  },
+  "namingPreview": {
+    "message": "プレビュー"
+  },
+  "namingSaveMode": {
+    "message": "保存方法"
+  },
+  "namingSaveFolder": {
+    "message": "既定のフォルダへ直接保存"
+  },
+  "namingSaveAsk": {
+    "message": "毎回保存先を確認"
+  },
+  "namingReset": {
+    "message": "既定値に戻す"
+  },
+  "namingSaved": {
+    "message": "保存しました"
+  },
+  "embyTitle": {
+    "message": "Emby メタデータ"
+  },
+  "embyOptional": {
+    "message": "任意"
+  },
+  "embyHelp": {
+    "message": "動画と一緒に NFO と画像を生成し、Emby / Jellyfin でそのまま読み込めるようにします。"
+  },
+  "embyEnable": {
+    "message": "Emby メタデータを生成"
+  },
+  "embyMediaType": {
+    "message": "メディア種別"
+  },
+  "embyTypeTv": {
+    "message": "テレビシリーズ"
+  },
+  "embyTypeMovie": {
+    "message": "映画"
+  },
+  "embyNfoEnable": {
+    "message": "NFO ファイルを生成"
+  },
+  "embyImagesEnable": {
+    "message": "poster / fanart / thumb 画像を取得"
+  },
+  "embyHint": {
+    "message": "ポスターとあらすじはページの Open Graph / JSON-LD から取得を試みます。取得できない項目は生成しません。"
+  },
+  "namingDirectory": {
+    "message": "保存先フォルダを指定"
+  },
+  "namingPickDirectory": {
+    "message": "フォルダを選択…"
+  },
+  "namingClearDirectory": {
+    "message": "解除"
+  },
+  "namingDirectoryHint": {
+    "message": "指定すると、動画と NFO / 画像をこのフォルダ（別ドライブも可）へ直接書き込みます。ブラウザの許可が必要で、再起動後に再選択が必要な場合があります。"
+  },
+  "namingDirectoryNone": {
+    "message": "未設定 — 上の既定フォルダを使用します。"
+  },
+  "namingDirectorySelected": {
+    "message": "現在のフォルダ：$NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "Media/RPlay"
+      }
+    }
+  },
+  "namingDirectoryPermission": {
+    "message": "フォルダ「$NAME$」の再許可が必要です。もう一度選択してください。",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "Media/RPlay"
+      }
+    }
+  },
+  "namingDirectoryUnsupported": {
+    "message": "このブラウザはフォルダ選択に未対応です。上の既定フォルダを使用してください。"
   }
 }

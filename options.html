@@ -78,6 +78,23 @@
     summary::after { content:'+'; position:absolute; right:3px; top:11px; font-size:20px; font-weight:400; color:#7890a6; }
     details[open] summary::after { content:'−'; }
     details p { padding:0 28px 16px 0; font-size:13px; max-width:870px; }
+    .text-input, textarea, select { width:100%; padding:9px 11px; border:1px solid #cddbe7; border-radius:8px; background:#fbfdff; color:inherit; font:inherit; }
+    .text-input:focus-visible, textarea:focus-visible, select:focus-visible { outline:3px solid #74bfff; outline-offset:2px; border-color:#9ec8e6; }
+    textarea { resize:vertical; font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; }
+    .field-label { display:block; margin:16px 0 6px; font-size:12px; font-weight:600; color:#3d5971; }
+    .panel > .field-label:first-of-type { margin-top:0; }
+    .field-hint { margin:6px 0 0; font-size:11px; line-height:1.6; color:#7a8ca0; }
+    .toggle { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; color:#3f5870; cursor:pointer; }
+    .toggle input { width:16px; height:16px; accent-color:var(--blue); }
+    .toggle:has(input:disabled) { opacity:.5; cursor:default; }
+    .preview-row { display:flex; align-items:center; gap:10px; margin-top:14px; padding:10px 12px; border:1px solid #e2ebf2; border-radius:9px; background:#f3f7fb; }
+    .preview-row > span { flex:none; font-size:11px; color:#708399; }
+    .preview-row code { min-width:0; color:#2c658f; font:600 12px ui-monospace,SFMono-Regular,Consolas,monospace; overflow-wrap:anywhere; }
+    .panel-actions { display:flex; align-items:center; gap:12px; margin-top:18px; }
+    .save-note { color:#237656; font-size:12px; }
+    .directory-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .directory-state { min-width:0; color:#617489; font-size:12px; overflow-wrap:anywhere; }
+    .directory-state[data-state=ready] { color:#237656; font-weight:600; }
     @media(max-width:720px) {
       main { padding:26px 20px 36px; }
       .brand { padding:15px 20px; }
@@ -121,6 +138,50 @@
         <li><span class="step" aria-hidden="true">3</span><span data-i18n="drmStepDownload">点击下载，保存视频</span></li>
       </ol>
     </section>
+
+    <div class="settings-grid">
+      <section class="panel" aria-labelledby="namingHeading">
+        <div class="section-heading"><h2 id="namingHeading" data-i18n="namingTitle">保存与命名</h2></div>
+        <p class="section-description" data-i18n="namingHelp">设置下载文件的保存位置和命名规则，支持类似 yt-dlp 的输出模板。</p>
+        <label class="field-label" for="defaultFolder" data-i18n="namingFolder">默认保存文件夹</label>
+        <input id="defaultFolder" class="text-input" type="text" placeholder="RPlay" autocomplete="off" spellcheck="false">
+        <p class="field-hint" data-i18n="namingFolderHint">相对浏览器“下载目录”的子文件夹，留空表示下载目录根。浏览器不允许写入绝对路径。</p>
+        <label class="field-label" for="outputTemplate" data-i18n="namingTemplate">输出模板</label>
+        <textarea id="outputTemplate" rows="3" autocomplete="off" spellcheck="false"></textarea>
+        <p class="field-hint" data-i18n="namingTemplateHint">支持 %(title)s、%(id)s、%(channel)s、%(channel_id)s、%(upload_date)s、%(release_date)s、%(resolution)s、%(ext)s；可用 | 指定默认值、&gt; 格式化日期、.N B 截断字节。</p>
+        <div class="preview-row"><span data-i18n="namingPreview">预览</span><code id="templatePreview"></code></div>
+        <label class="field-label" for="saveMode" data-i18n="namingSaveMode">保存方式</label>
+        <select id="saveMode">
+          <option value="folder" data-i18n="namingSaveFolder">直接保存到默认文件夹</option>
+          <option value="ask" data-i18n="namingSaveAsk">每次询问保存位置</option>
+        </select>
+        <label class="field-label" data-i18n="namingDirectory">自定义保存目录</label>
+        <div class="directory-row">
+          <button id="pickDirectory" class="secondary" type="button" data-i18n="namingPickDirectory">选择文件夹…</button>
+          <button id="clearDirectory" class="secondary" type="button" data-i18n="namingClearDirectory">清除</button>
+          <span id="directoryState" class="directory-state"></span>
+        </div>
+        <p class="field-hint" data-i18n="namingDirectoryHint">选中后将把视频与 NFO / 图片直接写入该目录（可跨盘）。需要浏览器授权，重启后可能需重新选择。</p>
+        <div class="panel-actions">
+          <button id="resetNaming" class="secondary" type="button" data-i18n="namingReset">恢复默认</button>
+          <span id="namingStatus" class="save-note" role="status" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="embyHeading">
+        <div class="section-heading"><h2 id="embyHeading" data-i18n="embyTitle">Emby 元数据</h2><span class="optional" data-i18n="embyOptional">可选</span></div>
+        <p class="section-description" data-i18n="embyHelp">随视频一起生成 NFO 与图片，方便 Emby / Jellyfin 等媒体库直接读取。</p>
+        <label class="toggle"><input id="embyEnabled" type="checkbox"><span data-i18n="embyEnable">生成 Emby 元数据</span></label>
+        <label class="field-label" for="embyMediaType" data-i18n="embyMediaType">媒体类型</label>
+        <select id="embyMediaType">
+          <option value="tv" data-i18n="embyTypeTv">剧集（TV）</option>
+          <option value="movie" data-i18n="embyTypeMovie">电影（Movie）</option>
+        </select>
+        <label class="toggle"><input id="embyNfo" type="checkbox"><span data-i18n="embyNfoEnable">生成 NFO 文件</span></label>
+        <label class="toggle"><input id="embyImages" type="checkbox"><span data-i18n="embyImagesEnable">下载 poster / fanart / thumb 图片</span></label>
+        <p class="field-hint" data-i18n="embyHint">图片与简介从视频页的 Open Graph / JSON-LD 尽力抓取；抓不到时对应文件不会生成。</p>
+      </section>
+    </div>
 
     <div class="settings-grid">
       <section class="panel" aria-labelledby="customHeading">

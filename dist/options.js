@@ -152,10 +152,10 @@
     });
     try {
       return await new Promise((resolve, reject) => {
-        const transaction = database.transaction("devices", mode);
-        const request = action(transaction.objectStore("devices"));
-        transaction.oncomplete = () => resolve(request.result ?? null);
-        transaction.onerror = transaction.onabort = () => reject(transaction.error);
+        const transaction2 = database.transaction("devices", mode);
+        const request = action(transaction2.objectStore("devices"));
+        transaction2.oncomplete = () => resolve(request.result ?? null);
+        transaction2.onerror = transaction2.onabort = () => reject(transaction2.error);
       });
     } finally {
       database.close();
@@ -204,9 +204,264 @@
     return device;
   }
 
+  // src/output-template.js
+  var DEFAULT_OUTPUT_TEMPLATE = "%(title)s_%(resolution)s_%(upload_date>%Y-%m-%dT%H-%M-%S)s.%(ext)s";
+  var PLACEHOLDER = /^(?:\.(\d+))?([sB])/;
+  function pad(value, length = 2) {
+    return String(value).padStart(length, "0");
+  }
+  function formatDate(date, format) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+    const year = date.getUTCFullYear();
+    const tokens = {
+      "%Y": String(year),
+      "%y": pad(year % 100),
+      "%m": pad(date.getUTCMonth() + 1),
+      "%d": pad(date.getUTCDate()),
+      "%H": pad(date.getUTCHours()),
+      "%M": pad(date.getUTCMinutes()),
+      "%S": pad(date.getUTCSeconds()),
+      "%j": pad(Math.floor((Date.UTC(year, date.getUTCMonth(), date.getUTCDate()) - Date.UTC(year, 0, 0)) / 864e5), 3),
+      "%%": "%"
+    };
+    return String(format).replace(/%[YymdHMSj%]/g, (token) => tokens[token] ?? token);
+  }
+  function truncateCharacters(value, limit) {
+    return [...value].slice(0, limit).join("");
+  }
+  function truncateBytes(value, limit) {
+    const bytes = new TextEncoder().encode(value);
+    if (bytes.length <= limit) return value;
+    let end = limit;
+    while (end > 0 && (bytes[end] & 192) === 128) end -= 1;
+    return new TextDecoder().decode(bytes.subarray(0, end));
+  }
+  function resolveExpression(fields, expression) {
+    const gt = expression.indexOf(">");
+    const name = (gt >= 0 ? expression.slice(0, gt) : expression).trim();
+    const format = gt >= 0 ? expression.slice(gt + 1) : null;
+    const raw = fields[name];
+    if (raw === void 0 || raw === null) return "";
+    if (raw instanceof Date) return formatDate(raw, format || "%Y%m%d");
+    return String(raw);
+  }
+  function renderField(body, limit, fields) {
+    const separator = body.indexOf("|");
+    const expressions = separator >= 0 ? body.slice(0, separator) : body;
+    const fallback = separator >= 0 ? body.slice(separator + 1) : null;
+    let value = "";
+    for (const alternative of expressions.split(",")) {
+      value = resolveExpression(fields, alternative);
+      if (value !== "") break;
+    }
+    if (value === "" && fallback !== null) value = fallback;
+    if (value === "" || !limit) return value;
+    return limit.bytes ? truncateBytes(value, limit.value) : truncateCharacters(value, limit.value);
+  }
+  function renderTemplate(template, fields = {}) {
+    const source = String(template ?? "");
+    let output = "";
+    let cursor = 0;
+    while (cursor < source.length) {
+      const start = source.indexOf("%(", cursor);
+      if (start < 0) {
+        output += source.slice(cursor);
+        break;
+      }
+      const end = source.indexOf(")", start + 2);
+      if (end < 0) {
+        output += source.slice(cursor);
+        break;
+      }
+      const spec = PLACEHOLDER.exec(source.slice(end + 1));
+      if (!spec) {
+        output += source.slice(cursor, end + 1);
+        cursor = end + 1;
+        continue;
+      }
+      const limit = spec[1] ? { value: Number(spec[1]), bytes: spec[2] === "B" } : null;
+      output += source.slice(cursor, start);
+      output += renderField(source.slice(start + 2, end), limit, fields);
+      cursor = end + 1 + spec[0].length;
+    }
+    return output;
+  }
+
+  // src/naming.js
+  function normalizeVideoTitle(value) {
+    const normalized = String(value || "").normalize("NFC").replace(/\s+/g, " ").replace(/\s*[|｜]\s*RPLAY\s*$/i, "").trim();
+    return /^(?:rplay|rplay\.live)$/i.test(normalized) ? "" : normalized;
+  }
+  var RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+  function sanitizePathSegment(value) {
+    const cleaned = String(value ?? "").normalize("NFC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/^\.+/, "").replace(/[. ]+$/g, "").trim();
+    if (!cleaned || RESERVED_NAMES.test(cleaned)) return cleaned ? `_${cleaned}` : "";
+    return [...cleaned].slice(0, 120).join("");
+  }
+  function toDate(value) {
+    if (!value) return "";
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? "" : date;
+  }
+  function asFieldText(value) {
+    return String(value ?? "").replace(/[\\/]+/g, "_");
+  }
+  function buildTemplateFields(task, extension) {
+    return {
+      title: asFieldText(normalizeVideoTitle(task?.title) || "rplay"),
+      id: asFieldText(task?.videoId || ""),
+      channel: asFieldText(task?.channel || ""),
+      channel_id: asFieldText(task?.channelId || ""),
+      upload_date: toDate(task?.createdAt),
+      release_date: toDate(task?.releaseDate),
+      resolution: asFieldText(task?.resolution || ""),
+      width: task?.width || "",
+      height: task?.height || "",
+      duration: Number.isFinite(task?.duration) ? Math.round(task.duration) : "",
+      ext: asFieldText(extension || "mp4")
+    };
+  }
+  function splitSegments(value) {
+    return String(value ?? "").split(/[\\/]+/);
+  }
+  function joinPath(segments) {
+    return segments.join("/");
+  }
+  function buildDownloadPath(task, extension, settings) {
+    const fields = buildTemplateFields(task, extension);
+    const template = settings?.outputTemplate || DEFAULT_OUTPUT_TEMPLATE;
+    const folderSegments = splitSegments(settings?.defaultFolder || "").map(sanitizePathSegment).filter(Boolean);
+    const extensionSuffix = `.${fields.ext}`;
+    const render = (candidate) => {
+      const segments = splitSegments(renderTemplate(candidate, fields)).map(sanitizePathSegment).filter(Boolean);
+      const name = segments.pop() || "";
+      if (!name) return;
+      const filename = name.toLowerCase().endsWith(extensionSuffix.toLowerCase()) ? name : `${name}${extensionSuffix}`;
+      const directory = joinPath([...folderSegments, ...segments].filter(Boolean));
+      const path = joinPath([directory, filename].filter(Boolean));
+      return { path, directory, name: filename, basename: filename.slice(0, filename.length - extensionSuffix.length) };
+    };
+    return render(template) || render(DEFAULT_OUTPUT_TEMPLATE) || {
+      path: `rplay_${fields.ext}`,
+      directory: "",
+      name: `rplay_${fields.ext}`,
+      basename: "rplay"
+    };
+  }
+
+  // src/output-directory.js
+  var DB_NAME = "rplay-output";
+  var STORE_NAME = "handles";
+  var HANDLE_KEY = "output";
+  function openDatabase() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(STORE_NAME);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  function transaction(db, mode, action) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, mode);
+      const request = action(tx.objectStore(STORE_NAME));
+      tx.oncomplete = () => resolve(request?.result ?? null);
+      tx.onerror = tx.onabort = () => reject(tx.error);
+    });
+  }
+  async function saveDirectoryHandle(handle) {
+    const db = await openDatabase();
+    try {
+      await transaction(db, "readwrite", (store) => store.put(handle, HANDLE_KEY));
+    } finally {
+      db.close();
+    }
+  }
+  async function loadDirectoryHandle() {
+    if (typeof indexedDB === "undefined") return null;
+    let db;
+    try {
+      db = await openDatabase();
+      return await transaction(db, "readonly", (store) => store.get(HANDLE_KEY));
+    } catch {
+      return null;
+    } finally {
+      db?.close();
+    }
+  }
+  async function clearDirectoryHandle() {
+    const db = await openDatabase();
+    try {
+      await transaction(db, "readwrite", (store) => store.delete(HANDLE_KEY));
+    } finally {
+      db.close();
+    }
+  }
+  async function directoryPermission(handle, { request = false } = {}) {
+    if (!handle?.queryPermission) return "unsupported";
+    const query = { mode: "readwrite" };
+    let state = await handle.queryPermission(query);
+    if (state !== "granted" && request && handle.requestPermission) {
+      state = await handle.requestPermission(query);
+    }
+    return state;
+  }
+
+  // src/settings.js
+  var SETTINGS_KEY = "rplaySettings";
+  var SAVE_MODES = Object.freeze(["folder", "ask"]);
+  var EMBY_MEDIA_TYPES = Object.freeze(["tv", "movie"]);
+  var DEFAULT_SETTINGS = Object.freeze({
+    saveMode: "folder",
+    defaultFolder: "RPlay",
+    outputTemplate: DEFAULT_OUTPUT_TEMPLATE,
+    embyEnabled: true,
+    embyMediaType: "tv",
+    embyNfo: true,
+    embyImages: true,
+    useCustomDirectory: false
+  });
+  function normalizeString(value, fallback, { allowEmpty = true, limit = 512 } = {}) {
+    if (typeof value !== "string") return fallback;
+    const trimmed = value.replace(/\r\n?/g, "\n");
+    const result = allowEmpty ? trimmed : trimmed.trim();
+    if (!allowEmpty && result.trim() === "") return fallback;
+    return [...result].slice(0, limit).join("");
+  }
+  function normalizeSettings(raw) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    return {
+      saveMode: SAVE_MODES.includes(source.saveMode) ? source.saveMode : DEFAULT_SETTINGS.saveMode,
+      defaultFolder: normalizeString(source.defaultFolder, DEFAULT_SETTINGS.defaultFolder),
+      outputTemplate: normalizeString(source.outputTemplate, DEFAULT_SETTINGS.outputTemplate, { allowEmpty: false }),
+      embyEnabled: typeof source.embyEnabled === "boolean" ? source.embyEnabled : DEFAULT_SETTINGS.embyEnabled,
+      embyMediaType: EMBY_MEDIA_TYPES.includes(source.embyMediaType) ? source.embyMediaType : DEFAULT_SETTINGS.embyMediaType,
+      embyNfo: typeof source.embyNfo === "boolean" ? source.embyNfo : DEFAULT_SETTINGS.embyNfo,
+      embyImages: typeof source.embyImages === "boolean" ? source.embyImages : DEFAULT_SETTINGS.embyImages,
+      useCustomDirectory: typeof source.useCustomDirectory === "boolean" ? source.useCustomDirectory : DEFAULT_SETTINGS.useCustomDirectory
+    };
+  }
+  function storageArea() {
+    if (typeof chrome === "undefined" || !chrome.storage) return null;
+    return chrome.storage.sync || chrome.storage.local || null;
+  }
+  async function loadSettings() {
+    const area = storageArea();
+    if (!area) return { ...DEFAULT_SETTINGS };
+    const stored = await area.get(SETTINGS_KEY).catch(() => ({}));
+    return normalizeSettings(stored?.[SETTINGS_KEY]);
+  }
+  async function saveSettings(patch) {
+    const current = await loadSettings();
+    const next = normalizeSettings({ ...current, ...patch });
+    const area = storageArea();
+    if (area) await area.set({ [SETTINGS_KEY]: next });
+    return next;
+  }
+
   // src/options.js
   var field = (id) => document.getElementById(id);
-  var message = (key) => chrome.i18n.getMessage(key);
+  var message = (key, substitutions) => chrome.i18n.getMessage(key, substitutions);
   for (const element of document.querySelectorAll("[data-i18n]")) {
     element.textContent = message(element.dataset.i18n) || element.textContent;
   }
@@ -288,5 +543,127 @@
     } finally {
       busy(false);
     }
+  });
+  var namingFields = {
+    defaultFolder: field("defaultFolder"),
+    outputTemplate: field("outputTemplate"),
+    saveMode: field("saveMode"),
+    embyEnabled: field("embyEnabled"),
+    embyMediaType: field("embyMediaType"),
+    embyNfo: field("embyNfo"),
+    embyImages: field("embyImages")
+  };
+  var SAMPLE_TASK = {
+    title: "\u793A\u4F8B\u89C6\u9891\u6807\u9898",
+    videoId: "abc123",
+    channel: "\u793A\u4F8B\u9891\u9053",
+    channelId: "UC123456",
+    resolution: "1920x1080",
+    width: 1920,
+    height: 1080,
+    duration: 3723,
+    createdAt: Date.UTC(2026, 6, 12, 10, 30, 0),
+    releaseDate: null
+  };
+  function readNamingForm() {
+    return {
+      defaultFolder: namingFields.defaultFolder.value,
+      outputTemplate: namingFields.outputTemplate.value,
+      saveMode: namingFields.saveMode.value,
+      embyEnabled: namingFields.embyEnabled.checked,
+      embyMediaType: namingFields.embyMediaType.value,
+      embyNfo: namingFields.embyNfo.checked,
+      embyImages: namingFields.embyImages.checked
+    };
+  }
+  function syncEmbyControls() {
+    const enabled = namingFields.embyEnabled.checked;
+    namingFields.embyMediaType.disabled = !enabled;
+    namingFields.embyNfo.disabled = !enabled;
+    namingFields.embyImages.disabled = !enabled;
+  }
+  function updatePreview() {
+    const settings = normalizeSettings(readNamingForm());
+    field("templatePreview").textContent = buildDownloadPath(SAMPLE_TASK, "mp4", settings).path;
+  }
+  function writeNamingForm(values) {
+    namingFields.defaultFolder.value = values.defaultFolder;
+    namingFields.outputTemplate.value = values.outputTemplate;
+    namingFields.saveMode.value = values.saveMode;
+    namingFields.embyEnabled.checked = values.embyEnabled;
+    namingFields.embyMediaType.value = values.embyMediaType;
+    namingFields.embyNfo.checked = values.embyNfo;
+    namingFields.embyImages.checked = values.embyImages;
+    syncEmbyControls();
+    updatePreview();
+  }
+  function showNamingStatus() {
+    field("namingStatus").textContent = message("namingSaved");
+    setTimeout(() => {
+      field("namingStatus").textContent = "";
+    }, 2e3);
+  }
+  var namingSaveTimer;
+  function scheduleNamingSave() {
+    updatePreview();
+    syncEmbyControls();
+    clearTimeout(namingSaveTimer);
+    namingSaveTimer = setTimeout(async () => {
+      await saveSettings(readNamingForm()).catch(() => {
+      });
+      showNamingStatus();
+    }, 300);
+  }
+  for (const element of Object.values(namingFields)) {
+    element.addEventListener("input", scheduleNamingSave);
+    element.addEventListener("change", scheduleNamingSave);
+  }
+  field("resetNaming").addEventListener("click", async () => {
+    writeNamingForm(DEFAULT_SETTINGS);
+    await saveSettings(DEFAULT_SETTINGS).catch(() => {
+    });
+    showNamingStatus();
+  });
+  loadSettings().then(writeNamingForm).catch(() => writeNamingForm({ ...DEFAULT_SETTINGS }));
+  async function renderDirectoryState() {
+    const state = field("directoryState");
+    const handle = await loadDirectoryHandle();
+    if (!handle) {
+      state.dataset.state = "";
+      state.textContent = message("namingDirectoryNone");
+      return;
+    }
+    const permission = await directoryPermission(handle);
+    if (permission === "granted") {
+      state.dataset.state = "ready";
+      state.textContent = message("namingDirectorySelected", [handle.name]);
+    } else {
+      state.dataset.state = "";
+      state.textContent = message("namingDirectoryPermission", [handle.name]);
+    }
+  }
+  field("pickDirectory").addEventListener("click", async () => {
+    if (!window.showDirectoryPicker) {
+      field("namingStatus").textContent = message("namingDirectoryUnsupported");
+      return;
+    }
+    try {
+      const handle = await window.showDirectoryPicker({ id: "rplay-output", mode: "readwrite" });
+      await directoryPermission(handle, { request: true });
+      await saveDirectoryHandle(handle);
+      await saveSettings({ useCustomDirectory: true });
+      await renderDirectoryState();
+      showNamingStatus();
+    } catch {
+    }
+  });
+  field("clearDirectory").addEventListener("click", async () => {
+    await clearDirectoryHandle().catch(() => {
+    });
+    await saveSettings({ useCustomDirectory: false }).catch(() => {
+    });
+    await renderDirectoryState();
+  });
+  renderDirectoryState().catch(() => {
   });
 })();

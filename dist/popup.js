@@ -79,8 +79,11 @@ ${streamUrl || ""}`;
     OFFSCREEN_CANCEL: "OFFSCREEN_CANCEL",
     OFFSCREEN_STATUS: "OFFSCREEN_STATUS",
     OFFSCREEN_RELEASE_FILE: "OFFSCREEN_RELEASE_FILE",
+    OFFSCREEN_WRITE_FILE: "OFFSCREEN_WRITE_FILE",
+    OFFSCREEN_FETCH_FILE: "OFFSCREEN_FETCH_FILE",
     OFFSCREEN_PROGRESS: "OFFSCREEN_PROGRESS",
     OFFSCREEN_FILE_READY: "OFFSCREEN_FILE_READY",
+    OFFSCREEN_FILE_SAVED: "OFFSCREEN_FILE_SAVED",
     OFFSCREEN_ERROR: "OFFSCREEN_ERROR",
     OFFSCREEN_CANCELED: "OFFSCREEN_CANCELED"
   });
@@ -93,6 +96,7 @@ ${streamUrl || ""}`;
     MessageType.OPEN_POPUP,
     MessageType.OFFSCREEN_PROGRESS,
     MessageType.OFFSCREEN_FILE_READY,
+    MessageType.OFFSCREEN_FILE_SAVED,
     MessageType.OFFSCREEN_ERROR,
     MessageType.OFFSCREEN_CANCELED
   ]);
@@ -100,7 +104,9 @@ ${streamUrl || ""}`;
     MessageType.OFFSCREEN_START,
     MessageType.OFFSCREEN_CANCEL,
     MessageType.OFFSCREEN_STATUS,
-    MessageType.OFFSCREEN_RELEASE_FILE
+    MessageType.OFFSCREEN_RELEASE_FILE,
+    MessageType.OFFSCREEN_WRITE_FILE,
+    MessageType.OFFSCREEN_FETCH_FILE
   ]);
   var TASK_EVENT_MESSAGE_TYPES = /* @__PURE__ */ new Set([
     MessageType.TASK_CREATED,
@@ -114,6 +120,7 @@ ${streamUrl || ""}`;
   var currentTasks = [];
   var videos = [];
   var currentPageTitle = "";
+  var currentPageMeta = {};
   var videoLoadVersion = 0;
   var pageTitleLoadVersion = 0;
   function message(key, substitutions, fallback = "") {
@@ -140,6 +147,7 @@ ${streamUrl || ""}`;
         pageTitleLoadVersion += 1;
         videos = [];
         currentPageTitle = "";
+        currentPageMeta = {};
         render();
         return;
       }
@@ -185,7 +193,10 @@ ${streamUrl || ""}`;
     const pageInfo = await chrome.tabs.sendMessage(currentTabId, {
       type: MessageType.GET_PAGE_VIDEO_TITLE
     }).catch(() => null);
-    if (version === pageTitleLoadVersion) currentPageTitle = normalizeVideoTitle(pageInfo?.title);
+    if (version === pageTitleLoadVersion) {
+      currentPageTitle = normalizeVideoTitle(pageInfo?.title);
+      currentPageMeta = pageInfo || {};
+    }
   }
   function upsertTask(task) {
     const index = currentTasks.findIndex((item) => item.taskId === task.taskId);
@@ -389,6 +400,8 @@ ${streamUrl || ""}`;
     }).catch(() => null);
     const liveTitle = normalizeVideoTitle(pageInfo?.title);
     if (liveTitle) currentPageTitle = liveTitle;
+    if (pageInfo) currentPageMeta = pageInfo;
+    const meta = currentPageMeta || {};
     const response = await chrome.runtime.sendMessage({
       type: MessageType.DOWNLOAD_VIDEO,
       tabId: currentTabId,
@@ -405,9 +418,17 @@ ${streamUrl || ""}`;
         width: stream.width,
         height: stream.height,
         bandwidth: stream.bandwidth,
-        duration: video.duration,
+        duration: video.duration || meta.duration || null,
         hasExternalAudio: stream.hasExternalAudio,
-        sessionKeys: video.sessionKeys || []
+        sessionKeys: video.sessionKeys || [],
+        channel: meta.channel || null,
+        channelId: meta.channelId || null,
+        videoId: meta.videoId || null,
+        releaseDate: meta.releaseDate || null,
+        description: meta.description || null,
+        posterUrl: meta.posterUrl || null,
+        fanartUrl: meta.fanartUrl || null,
+        thumbUrl: meta.thumbUrl || null
       }
     }).catch((error) => ({ success: false, error: error?.message || String(error) }));
     if (!response?.success) {

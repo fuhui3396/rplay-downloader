@@ -1,8 +1,16 @@
 import { importWvd, MAX_DEVICE_BYTES } from './cdm-browser.js';
 import { loadDevice, saveDevice, restoreBundledDevice } from './cdm-device-store.js';
+import { buildDownloadPath } from './naming.js';
+import {
+  clearDirectoryHandle,
+  directoryPermission,
+  loadDirectoryHandle,
+  saveDirectoryHandle,
+} from './output-directory.js';
+import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, saveSettings } from './settings.js';
 
 const field = (id) => document.getElementById(id);
-const message = (key) => chrome.i18n.getMessage(key);
+const message = (key, substitutions) => chrome.i18n.getMessage(key, substitutions);
 for (const element of document.querySelectorAll('[data-i18n]')) {
   element.textContent = message(element.dataset.i18n) || element.textContent;
 }
@@ -84,3 +92,132 @@ field('restore').addEventListener('click', async () => {
     showStatus('drmRestoreFailed', 'error');
   } finally { busy(false); }
 });
+
+const namingFields = {
+  defaultFolder: field('defaultFolder'),
+  outputTemplate: field('outputTemplate'),
+  saveMode: field('saveMode'),
+  embyEnabled: field('embyEnabled'),
+  embyMediaType: field('embyMediaType'),
+  embyNfo: field('embyNfo'),
+  embyImages: field('embyImages'),
+};
+
+const SAMPLE_TASK = {
+  title: '示例视频标题',
+  videoId: 'abc123',
+  channel: '示例频道',
+  channelId: 'UC123456',
+  resolution: '1920x1080',
+  width: 1920,
+  height: 1080,
+  duration: 3_723,
+  createdAt: Date.UTC(2026, 6, 12, 10, 30, 0),
+  releaseDate: null,
+};
+
+function readNamingForm() {
+  return {
+    defaultFolder: namingFields.defaultFolder.value,
+    outputTemplate: namingFields.outputTemplate.value,
+    saveMode: namingFields.saveMode.value,
+    embyEnabled: namingFields.embyEnabled.checked,
+    embyMediaType: namingFields.embyMediaType.value,
+    embyNfo: namingFields.embyNfo.checked,
+    embyImages: namingFields.embyImages.checked,
+  };
+}
+
+function syncEmbyControls() {
+  const enabled = namingFields.embyEnabled.checked;
+  namingFields.embyMediaType.disabled = !enabled;
+  namingFields.embyNfo.disabled = !enabled;
+  namingFields.embyImages.disabled = !enabled;
+}
+
+function updatePreview() {
+  const settings = normalizeSettings(readNamingForm());
+  field('templatePreview').textContent = buildDownloadPath(SAMPLE_TASK, 'mp4', settings).path;
+}
+
+function writeNamingForm(values) {
+  namingFields.defaultFolder.value = values.defaultFolder;
+  namingFields.outputTemplate.value = values.outputTemplate;
+  namingFields.saveMode.value = values.saveMode;
+  namingFields.embyEnabled.checked = values.embyEnabled;
+  namingFields.embyMediaType.value = values.embyMediaType;
+  namingFields.embyNfo.checked = values.embyNfo;
+  namingFields.embyImages.checked = values.embyImages;
+  syncEmbyControls();
+  updatePreview();
+}
+
+function showNamingStatus() {
+  field('namingStatus').textContent = message('namingSaved');
+  setTimeout(() => { field('namingStatus').textContent = ''; }, 2_000);
+}
+
+let namingSaveTimer;
+function scheduleNamingSave() {
+  updatePreview();
+  syncEmbyControls();
+  clearTimeout(namingSaveTimer);
+  namingSaveTimer = setTimeout(async () => {
+    await saveSettings(readNamingForm()).catch(() => {});
+    showNamingStatus();
+  }, 300);
+}
+
+for (const element of Object.values(namingFields)) {
+  element.addEventListener('input', scheduleNamingSave);
+  element.addEventListener('change', scheduleNamingSave);
+}
+field('resetNaming').addEventListener('click', async () => {
+  writeNamingForm(DEFAULT_SETTINGS);
+  await saveSettings(DEFAULT_SETTINGS).catch(() => {});
+  showNamingStatus();
+});
+loadSettings().then(writeNamingForm).catch(() => writeNamingForm({ ...DEFAULT_SETTINGS }));
+
+async function renderDirectoryState() {
+  const state = field('directoryState');
+  const handle = await loadDirectoryHandle();
+  if (!handle) {
+    state.dataset.state = '';
+    state.textContent = message('namingDirectoryNone');
+    return;
+  }
+  const permission = await directoryPermission(handle);
+  if (permission === 'granted') {
+    state.dataset.state = 'ready';
+    state.textContent = message('namingDirectorySelected', [handle.name]);
+  } else {
+    state.dataset.state = '';
+    state.textContent = message('namingDirectoryPermission', [handle.name]);
+  }
+}
+
+field('pickDirectory').addEventListener('click', async () => {
+  if (!window.showDirectoryPicker) {
+    field('namingStatus').textContent = message('namingDirectoryUnsupported');
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ id: 'rplay-output', mode: 'readwrite' });
+    await directoryPermission(handle, { request: true });
+    await saveDirectoryHandle(handle);
+    await saveSettings({ useCustomDirectory: true });
+    await renderDirectoryState();
+    showNamingStatus();
+  } catch {
+    // The user cancelled the picker or denied permission; keep the old setting.
+  }
+});
+
+field('clearDirectory').addEventListener('click', async () => {
+  await clearDirectoryHandle().catch(() => {});
+  await saveSettings({ useCustomDirectory: false }).catch(() => {});
+  await renderDirectoryState();
+});
+
+renderDirectoryState().catch(() => {});

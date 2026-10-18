@@ -4959,8 +4959,8 @@
             }
             assert(track.info?.type === "audio");
             slice.skip(4);
-            const tag = readU8(slice);
-            assert(tag === 3);
+            const tag2 = readU8(slice);
+            assert(tag2 === 3);
             readIsomVariableInteger(slice);
             slice.skip(2);
             const mixed = readU8(slice);
@@ -7047,8 +7047,8 @@
           if (slice instanceof Promise)
             slice = await slice;
           assert(slice);
-          const tag = readAscii(slice, 3);
-          if (tag === "TAG") {
+          const tag2 = readAscii(slice, 3);
+          if (tag2 === "TAG") {
             parseId3V1Tag(slice, this.metadataTags);
           }
         }
@@ -11444,10 +11444,10 @@
           }
         }
         const videoGroupIds = [
-          ...new Set(mediaTags.filter((tag) => tag.attributes.get("type").toLowerCase() === "video").map((tag) => tag.attributes.get("group-id")))
+          ...new Set(mediaTags.filter((tag2) => tag2.attributes.get("type").toLowerCase() === "video").map((tag2) => tag2.attributes.get("group-id")))
         ];
         const audioGroupIds = [
-          ...new Set(mediaTags.filter((tag) => tag.attributes.get("type").toLowerCase() === "audio").map((tag) => tag.attributes.get("group-id")))
+          ...new Set(mediaTags.filter((tag2) => tag2.attributes.get("type").toLowerCase() === "audio").map((tag2) => tag2.attributes.get("group-id")))
         ];
         const internalTracksByVariant = await Promise.all(variantStreams.map(async (variantStream, i) => {
           const result = [];
@@ -11495,9 +11495,9 @@
             if (!audioGroupIds.includes(audioGroupId)) {
               throw new Error(`Invalid M3U8 file; variant stream references audio group "${audioGroupId}" which is not defined in any #EXT-X-MEDIA tags.`);
             }
-            const matchingAudioMediaTag = mediaTags.find((tag) => {
-              const groupId = tag.attributes.get("group-id");
-              const type = tag.attributes.get("type");
+            const matchingAudioMediaTag = mediaTags.find((tag2) => {
+              const groupId = tag2.attributes.get("group-id");
+              const type = tag2.attributes.get("type");
               return groupId === audioGroupId && type.toLowerCase() === "audio";
             });
             outer: if (matchingAudioMediaTag) {
@@ -14124,12 +14124,12 @@
   };
   var readId3V2Header = (slice) => {
     const startPos = slice.filePos;
-    const tag = readAscii(slice, 3);
+    const tag2 = readAscii(slice, 3);
     const majorVersion = readU8(slice);
     const revision = readU8(slice);
     const flags = readU8(slice);
     const sizeRaw = readU32Be(slice);
-    if (tag !== "ID3" || majorVersion === 255 || revision === 255 || (sizeRaw & 2155905152) !== 0) {
+    if (tag2 !== "ID3" || majorVersion === 255 || revision === 255 || (sizeRaw & 2155905152) !== 0) {
       slice.filePos = startPos;
       return null;
     }
@@ -19139,8 +19139,11 @@
     OFFSCREEN_CANCEL: "OFFSCREEN_CANCEL",
     OFFSCREEN_STATUS: "OFFSCREEN_STATUS",
     OFFSCREEN_RELEASE_FILE: "OFFSCREEN_RELEASE_FILE",
+    OFFSCREEN_WRITE_FILE: "OFFSCREEN_WRITE_FILE",
+    OFFSCREEN_FETCH_FILE: "OFFSCREEN_FETCH_FILE",
     OFFSCREEN_PROGRESS: "OFFSCREEN_PROGRESS",
     OFFSCREEN_FILE_READY: "OFFSCREEN_FILE_READY",
+    OFFSCREEN_FILE_SAVED: "OFFSCREEN_FILE_SAVED",
     OFFSCREEN_ERROR: "OFFSCREEN_ERROR",
     OFFSCREEN_CANCELED: "OFFSCREEN_CANCELED"
   });
@@ -19153,6 +19156,7 @@
     MessageType.OPEN_POPUP,
     MessageType.OFFSCREEN_PROGRESS,
     MessageType.OFFSCREEN_FILE_READY,
+    MessageType.OFFSCREEN_FILE_SAVED,
     MessageType.OFFSCREEN_ERROR,
     MessageType.OFFSCREEN_CANCELED
   ]);
@@ -19160,7 +19164,9 @@
     MessageType.OFFSCREEN_START,
     MessageType.OFFSCREEN_CANCEL,
     MessageType.OFFSCREEN_STATUS,
-    MessageType.OFFSCREEN_RELEASE_FILE
+    MessageType.OFFSCREEN_RELEASE_FILE,
+    MessageType.OFFSCREEN_WRITE_FILE,
+    MessageType.OFFSCREEN_FETCH_FILE
   ]);
   var TASK_EVENT_MESSAGE_TYPES = /* @__PURE__ */ new Set([
     MessageType.TASK_CREATED,
@@ -20887,7 +20893,7 @@
           throw new Error(`Invalid namespace in pattern: ${part}`);
         }
       }
-      let tag = void 0;
+      let tag2 = void 0;
       let positionMatch = null;
       if (tagAndPosition.includes(":")) {
         const colonIndex = tagAndPosition.lastIndexOf(":");
@@ -20895,18 +20901,18 @@
         const posPart = tagAndPosition.substring(colonIndex + 1).trim();
         const isPositionKeyword = ["first", "last", "odd", "even"].includes(posPart) || /^nth\(\d+\)$/.test(posPart);
         if (isPositionKeyword) {
-          tag = tagPart;
+          tag2 = tagPart;
           positionMatch = posPart;
         } else {
-          tag = tagAndPosition;
+          tag2 = tagAndPosition;
         }
       } else {
-        tag = tagAndPosition;
+        tag2 = tagAndPosition;
       }
-      if (!tag) {
+      if (!tag2) {
         throw new Error(`Invalid segment pattern: ${part}`);
       }
-      segment.tag = tag;
+      segment.tag = tag2;
       if (namespace) {
         segment.namespace = namespace;
       }
@@ -21000,9 +21006,9 @@
       if (expression.hasDeepWildcard()) {
         const lastSeg2 = expression.segments[expression.segments.length - 1];
         if (lastSeg2 && lastSeg2.type !== "deep-wildcard" && lastSeg2.tag !== "*") {
-          const tag2 = lastSeg2.tag;
-          if (!this._deepByTerminalTag.has(tag2)) this._deepByTerminalTag.set(tag2, []);
-          this._deepByTerminalTag.get(tag2).push(expression);
+          const tag3 = lastSeg2.tag;
+          if (!this._deepByTerminalTag.has(tag3)) this._deepByTerminalTag.set(tag3, []);
+          this._deepByTerminalTag.get(tag3).push(expression);
         } else {
           this._deepWildcards.push(expression);
         }
@@ -21010,12 +21016,12 @@
       }
       const depth = expression.length;
       const lastSeg = expression.segments[expression.segments.length - 1];
-      const tag = lastSeg?.tag;
-      if (!tag || tag === "*") {
+      const tag2 = lastSeg?.tag;
+      if (!tag2 || tag2 === "*") {
         if (!this._wildcardByDepth.has(depth)) this._wildcardByDepth.set(depth, []);
         this._wildcardByDepth.get(depth).push(expression);
       } else {
-        const key = `${depth}:${tag}`;
+        const key = `${depth}:${tag2}`;
         if (!this._byDepthAndTag.has(key)) this._byDepthAndTag.set(key, []);
         this._byDepthAndTag.get(key).push(expression);
       }
@@ -21109,8 +21115,8 @@
     */
     findMatch(matcher) {
       const depth = matcher.getDepth();
-      const tag = matcher.getCurrentTag();
-      const exactKey = `${depth}:${tag}`;
+      const tag2 = matcher.getCurrentTag();
+      const exactKey = `${depth}:${tag2}`;
       const exactBucket = this._byDepthAndTag.get(exactKey);
       if (exactBucket) {
         for (let i = 0; i < exactBucket.length; i++) {
@@ -21123,7 +21129,7 @@
           if (matcher.matches(wildcardBucket[i])) return wildcardBucket[i];
         }
       }
-      const deepBucket = this._deepByTerminalTag.get(tag);
+      const deepBucket = this._deepByTerminalTag.get(tag2);
       if (deepBucket) {
         for (let i = 0; i < deepBucket.length; i++) {
           if (matcher.matches(deepBucket[i])) return deepBucket[i];
@@ -23253,7 +23259,7 @@
     let hasContentProtection = false;
     const periods = asArray(document2.MPD.Period);
     const presentationUnsupported = document2.MPD["@_type"] === "dynamic" || periods.length !== 1 || Boolean(durationSeconds(periods[0]?.["@_start"]));
-    function visit(node, inheritedBases, inherited = {}, tag = "MPD") {
+    function visit(node, inheritedBases, inherited = {}, tag2 = "MPD") {
       if (!node || typeof node !== "object") return;
       if (Object.hasOwn(node, "ContentProtection")) hasContentProtection = true;
       const declaredBases = asArray(node.BaseURL).map((base) => typeof base === "string" ? base : base?.["#text"]).filter((base) => typeof base === "string" && base.trim());
@@ -23291,7 +23297,7 @@
           }
         }
       }
-      if (tag === "Representation") {
+      if (tag2 === "Representation") {
         const type = mediaType(attributes, bases);
         if (type) {
           const id = String(node["@_id"] ?? representations.length);
@@ -23741,20 +23747,152 @@ ${quote(segment.url)}
     }
   }
 
+  // src/output-template.js
+  var DEFAULT_OUTPUT_TEMPLATE = "%(title)s_%(resolution)s_%(upload_date>%Y-%m-%dT%H-%M-%S)s.%(ext)s";
+  var PLACEHOLDER = /^(?:\.(\d+))?([sB])/;
+  function pad(value, length = 2) {
+    return String(value).padStart(length, "0");
+  }
+  function formatDate(date, format) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+    const year = date.getUTCFullYear();
+    const tokens = {
+      "%Y": String(year),
+      "%y": pad(year % 100),
+      "%m": pad(date.getUTCMonth() + 1),
+      "%d": pad(date.getUTCDate()),
+      "%H": pad(date.getUTCHours()),
+      "%M": pad(date.getUTCMinutes()),
+      "%S": pad(date.getUTCSeconds()),
+      "%j": pad(Math.floor((Date.UTC(year, date.getUTCMonth(), date.getUTCDate()) - Date.UTC(year, 0, 0)) / 864e5), 3),
+      "%%": "%"
+    };
+    return String(format).replace(/%[YymdHMSj%]/g, (token) => tokens[token] ?? token);
+  }
+  function truncateCharacters(value, limit) {
+    return [...value].slice(0, limit).join("");
+  }
+  function truncateBytes(value, limit) {
+    const bytes2 = new TextEncoder().encode(value);
+    if (bytes2.length <= limit) return value;
+    let end = limit;
+    while (end > 0 && (bytes2[end] & 192) === 128) end -= 1;
+    return new TextDecoder().decode(bytes2.subarray(0, end));
+  }
+  function resolveExpression(fields, expression) {
+    const gt = expression.indexOf(">");
+    const name = (gt >= 0 ? expression.slice(0, gt) : expression).trim();
+    const format = gt >= 0 ? expression.slice(gt + 1) : null;
+    const raw = fields[name];
+    if (raw === void 0 || raw === null) return "";
+    if (raw instanceof Date) return formatDate(raw, format || "%Y%m%d");
+    return String(raw);
+  }
+  function renderField(body, limit, fields) {
+    const separator = body.indexOf("|");
+    const expressions = separator >= 0 ? body.slice(0, separator) : body;
+    const fallback = separator >= 0 ? body.slice(separator + 1) : null;
+    let value = "";
+    for (const alternative of expressions.split(",")) {
+      value = resolveExpression(fields, alternative);
+      if (value !== "") break;
+    }
+    if (value === "" && fallback !== null) value = fallback;
+    if (value === "" || !limit) return value;
+    return limit.bytes ? truncateBytes(value, limit.value) : truncateCharacters(value, limit.value);
+  }
+  function renderTemplate(template, fields = {}) {
+    const source = String(template ?? "");
+    let output = "";
+    let cursor = 0;
+    while (cursor < source.length) {
+      const start = source.indexOf("%(", cursor);
+      if (start < 0) {
+        output += source.slice(cursor);
+        break;
+      }
+      const end = source.indexOf(")", start + 2);
+      if (end < 0) {
+        output += source.slice(cursor);
+        break;
+      }
+      const spec = PLACEHOLDER.exec(source.slice(end + 1));
+      if (!spec) {
+        output += source.slice(cursor, end + 1);
+        cursor = end + 1;
+        continue;
+      }
+      const limit = spec[1] ? { value: Number(spec[1]), bytes: spec[2] === "B" } : null;
+      output += source.slice(cursor, start);
+      output += renderField(source.slice(start + 2, end), limit, fields);
+      cursor = end + 1 + spec[0].length;
+    }
+    return output;
+  }
+
   // src/naming.js
   function normalizeVideoTitle(value) {
     const normalized = String(value || "").normalize("NFC").replace(/\s+/g, " ").replace(/\s*[|｜]\s*RPLAY\s*$/i, "").trim();
     return /^(?:rplay|rplay\.live)$/i.test(normalized) ? "" : normalized;
   }
-  function sanitizeFilename(value) {
-    const cleaned = normalizeVideoTitle(value || "rplay").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
-    return [...cleaned || "rplay"].slice(0, 100).join("");
+  var RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+  function sanitizePathSegment(value) {
+    const cleaned = String(value ?? "").normalize("NFC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/^\.+/, "").replace(/[. ]+$/g, "").trim();
+    if (!cleaned || RESERVED_NAMES.test(cleaned)) return cleaned ? `_${cleaned}` : "";
+    return [...cleaned].slice(0, 120).join("");
+  }
+  function toDate(value) {
+    if (!value) return "";
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? "" : date;
+  }
+  function asFieldText(value) {
+    return String(value ?? "").replace(/[\\/]+/g, "_");
+  }
+  function buildTemplateFields(task, extension) {
+    return {
+      title: asFieldText(normalizeVideoTitle(task?.title) || "rplay"),
+      id: asFieldText(task?.videoId || ""),
+      channel: asFieldText(task?.channel || ""),
+      channel_id: asFieldText(task?.channelId || ""),
+      upload_date: toDate(task?.createdAt),
+      release_date: toDate(task?.releaseDate),
+      resolution: asFieldText(task?.resolution || ""),
+      width: task?.width || "",
+      height: task?.height || "",
+      duration: Number.isFinite(task?.duration) ? Math.round(task.duration) : "",
+      ext: asFieldText(extension || "mp4")
+    };
+  }
+  function splitSegments(value) {
+    return String(value ?? "").split(/[\\/]+/);
+  }
+  function joinPath(segments) {
+    return segments.join("/");
+  }
+  function buildDownloadPath(task, extension, settings) {
+    const fields = buildTemplateFields(task, extension);
+    const template = settings?.outputTemplate || DEFAULT_OUTPUT_TEMPLATE;
+    const folderSegments = splitSegments(settings?.defaultFolder || "").map(sanitizePathSegment).filter(Boolean);
+    const extensionSuffix = `.${fields.ext}`;
+    const render = (candidate) => {
+      const segments = splitSegments(renderTemplate(candidate, fields)).map(sanitizePathSegment).filter(Boolean);
+      const name = segments.pop() || "";
+      if (!name) return;
+      const filename = name.toLowerCase().endsWith(extensionSuffix.toLowerCase()) ? name : `${name}${extensionSuffix}`;
+      const directory = joinPath([...folderSegments, ...segments].filter(Boolean));
+      const path = joinPath([directory, filename].filter(Boolean));
+      return { path, directory, name: filename, basename: filename.slice(0, filename.length - extensionSuffix.length) };
+    };
+    return render(template) || render(DEFAULT_OUTPUT_TEMPLATE) || {
+      path: `rplay_${fields.ext}`,
+      directory: "",
+      name: `rplay_${fields.ext}`,
+      basename: "rplay"
+    };
   }
   function makeDownloadFilename(task, extension) {
-    const title = sanitizeFilename(task.title || "rplay");
-    const resolution = sanitizeFilename(task.resolution || "video");
-    const timestamp = new Date(task.createdAt).toISOString().replace(/[:.]/g, "-");
-    return `${title}_${resolution}_${timestamp}.${extension}`;
+    return buildDownloadPath(task, extension, null).name;
   }
 
   // src/progress.js
@@ -23930,9 +24068,9 @@ ${quote(segment.url)}
     };
     while (offset < bytes2.length) {
       if (++count > 8192) throw new Error("Too many protobuf fields");
-      const tag = readInteger();
-      if (typeof tag !== "number" || tag < 8 || tag > 4294967295) throw new Error("Invalid protobuf tag");
-      const id = Math.floor(tag / 8), wire = tag % 8;
+      const tag2 = readInteger();
+      if (typeof tag2 !== "number" || tag2 < 8 || tag2 > 4294967295) throw new Error("Invalid protobuf tag");
+      const id = Math.floor(tag2 / 8), wire = tag2 % 8;
       let value;
       if (wire === 0) value = readInteger();
       else {
@@ -23996,7 +24134,7 @@ ${quote(segment.url)}
     mac2.fill(0);
     return { enc, mac };
   }
-  function der(tag, value) {
+  function der(tag2, value) {
     const length = [];
     if (value.length < 128) length.push(value.length);
     else {
@@ -24007,7 +24145,7 @@ ${quote(segment.url)}
       }
       length.unshift(128 | length.length);
     }
-    return concatBytes(new Uint8Array([tag, ...length]), value);
+    return concatBytes(new Uint8Array([tag2, ...length]), value);
   }
   var rsaAlgorithm = new Uint8Array([48, 13, 6, 9, 42, 134, 72, 134, 247, 13, 1, 1, 1, 5, 0]);
   var wrapPrivateKey = (pkcs1) => der(48, concatBytes(new Uint8Array([2, 1, 0]), rsaAlgorithm, der(4, pkcs1)));
@@ -24178,10 +24316,10 @@ ${quote(segment.url)}
     });
     try {
       return await new Promise((resolve, reject) => {
-        const transaction = database.transaction("devices", mode);
-        const request = action(transaction.objectStore("devices"));
-        transaction.oncomplete = () => resolve(request.result ?? null);
-        transaction.onerror = transaction.onabort = () => reject(transaction.error);
+        const transaction2 = database.transaction("devices", mode);
+        const request = action(transaction2.objectStore("devices"));
+        transaction2.oncomplete = () => resolve(request.result ?? null);
+        transaction2.onerror = transaction2.onabort = () => reject(transaction2.error);
       });
     } finally {
       database.close();
@@ -24360,12 +24498,273 @@ ${quote(segment.url)}
     return resolveKeyId;
   }
 
+  // src/output-directory.js
+  var DB_NAME = "rplay-output";
+  var STORE_NAME = "handles";
+  var HANDLE_KEY = "output";
+  function openDatabase() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(STORE_NAME);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  function transaction(db, mode, action) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, mode);
+      const request = action(tx.objectStore(STORE_NAME));
+      tx.oncomplete = () => resolve(request?.result ?? null);
+      tx.onerror = tx.onabort = () => reject(tx.error);
+    });
+  }
+  async function loadDirectoryHandle() {
+    if (typeof indexedDB === "undefined") return null;
+    let db;
+    try {
+      db = await openDatabase();
+      return await transaction(db, "readonly", (store) => store.get(HANDLE_KEY));
+    } catch {
+      return null;
+    } finally {
+      db?.close();
+    }
+  }
+  async function directoryPermission(handle, { request = false } = {}) {
+    if (!handle?.queryPermission) return "unsupported";
+    const query = { mode: "readwrite" };
+    let state = await handle.queryPermission(query);
+    if (state !== "granted" && request && handle.requestPermission) {
+      state = await handle.requestPermission(query);
+    }
+    return state;
+  }
+  async function resolveWritableDirectory() {
+    const handle = await loadDirectoryHandle();
+    if (!handle) return null;
+    return await directoryPermission(handle) === "granted" ? handle : null;
+  }
+  async function writeFileToDirectory(root, relativePath, blob) {
+    const segments = String(relativePath || "").split("/").filter(Boolean);
+    const filename = segments.pop();
+    if (!filename) throw new Error("\u8F93\u51FA\u8DEF\u5F84\u4E3A\u7A7A");
+    let directory = root;
+    for (const segment of segments) {
+      directory = await directory.getDirectoryHandle(segment, { create: true });
+    }
+    const fileHandle = await directory.getFileHandle(filename, { create: true });
+    const writable = await fileHandle.createWritable();
+    try {
+      await writable.write(blob);
+    } finally {
+      await writable.close();
+    }
+  }
+
+  // src/sidecars.js
+  function xmlEscape(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&apos;"
+    })[character]);
+  }
+  function tag(name, value) {
+    const text = String(value ?? "").trim();
+    return text ? `  <${name}>${xmlEscape(text)}</${name}>` : "";
+  }
+  function uniqueIdTag(task) {
+    return task.videoId ? `  <uniqueid type="rplay" default="true">${xmlEscape(task.videoId)}</uniqueid>` : "";
+  }
+  function runtimeMinutes(duration) {
+    return Number.isFinite(duration) && duration > 0 ? Math.max(1, Math.round(duration / 60)) : "";
+  }
+  function episodeInfo(task) {
+    const value = task.releaseDate || task.createdAt;
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return {
+      season: date.getUTCFullYear(),
+      episode: (date.getUTCMonth() + 1) * 100 + date.getUTCDate(),
+      aired: formatDate(date, "%Y-%m-%d")
+    };
+  }
+  function buildXml(root, lines) {
+    return [
+      '<?xml version="1.0" encoding="utf-8" standalone="yes"?>',
+      `<${root}>`,
+      ...lines.filter(Boolean),
+      `</${root}>`,
+      ""
+    ].join("\n");
+  }
+  function seriesDirectories(directory) {
+    if (!directory) return { seriesDir: "", seasonDir: "" };
+    const segments = directory.split("/");
+    if (/^season[\s._-]*\d*$/i.test(segments[segments.length - 1] || "")) {
+      return { seriesDir: segments.slice(0, -1).join("/"), seasonDir: directory };
+    }
+    return { seriesDir: directory, seasonDir: "" };
+  }
+  function buildItemNfo(task, settings) {
+    const info = episodeInfo(task);
+    const description = task.description || "";
+    if (settings.embyMediaType === "movie") {
+      return buildXml("movie", [
+        tag("title", task.title),
+        tag("originaltitle", task.title),
+        tag("plot", description),
+        tag("outline", description),
+        tag("studio", task.channel),
+        uniqueIdTag(task),
+        tag("premiered", info?.aired),
+        tag("releasedate", info?.aired),
+        tag("runtime", runtimeMinutes(task.duration))
+      ]);
+    }
+    return buildXml("episodedetails", [
+      tag("title", task.title),
+      tag("showtitle", task.channel || task.title),
+      tag("season", info?.season),
+      tag("episode", info?.episode),
+      tag("plot", description),
+      tag("aired", info?.aired),
+      tag("runtime", runtimeMinutes(task.duration)),
+      tag("studio", task.channel),
+      uniqueIdTag(task)
+    ]);
+  }
+  function buildTvShowNfo(task) {
+    return buildXml("tvshow", [
+      tag("title", task.channel || task.title),
+      tag("plot", task.description),
+      tag("studio", task.channel),
+      task.channelId ? `  <uniqueid type="rplay" default="true">${xmlEscape(task.channelId)}</uniqueid>` : ""
+    ]);
+  }
+  function buildSeasonNfo(task) {
+    const info = episodeInfo(task);
+    return buildXml("season", [tag("seasonnumber", info?.season)]);
+  }
+  function buildSidecarPlan(task, settings, target) {
+    if (!target || !target.basename) return { files: [], images: [] };
+    const directory = target.directory;
+    const base = directory ? `${directory}/${target.basename}` : target.basename;
+    const files = [];
+    const images = [];
+    if (settings.embyImages) {
+      const poster = task.posterUrl || task.thumbUrl || "";
+      const fanart = task.fanartUrl || task.posterUrl || task.thumbUrl || "";
+      const thumb = task.thumbUrl || task.posterUrl || "";
+      if (poster) images.push({ filename: `${base}-poster.jpg`, url: poster });
+      if (fanart) images.push({ filename: `${base}-fanart.jpg`, url: fanart });
+      if (thumb) images.push({ filename: `${base}-thumb.jpg`, url: thumb });
+    }
+    if (settings.embyNfo) {
+      files.push({ filename: `${base}.nfo`, content: buildItemNfo(task, settings), conflictAction: "uniquify" });
+      if (settings.embyMediaType === "tv") {
+        const { seriesDir, seasonDir } = seriesDirectories(directory);
+        if (seriesDir) {
+          files.push({ filename: `${seriesDir}/tvshow.nfo`, content: buildTvShowNfo(task), conflictAction: "overwrite" });
+        }
+        if (seasonDir) {
+          files.push({ filename: `${seasonDir}/season.nfo`, content: buildSeasonNfo(task), conflictAction: "overwrite" });
+        }
+      }
+    }
+    return { files, images };
+  }
+
+  // src/fs-output.js
+  async function saveToCustomDirectory(task, extension, settings, file) {
+    if (!settings?.useCustomDirectory) return null;
+    const root = await resolveWritableDirectory();
+    if (!root) return null;
+    const target = buildDownloadPath(task, extension, settings);
+    await writeFileToDirectory(root, target.path, file);
+    const plan = buildSidecarPlan(task, settings, target);
+    for (const sidecar of plan.files) {
+      await writeFileToDirectory(root, sidecar.filename, new Blob([sidecar.content], {
+        type: "application/xml;charset=utf-8"
+      })).catch(() => {
+      });
+    }
+    for (const image of plan.images) {
+      try {
+        const response = await fetch(image.url, { credentials: "include" });
+        if (!response.ok) continue;
+        await writeFileToDirectory(root, image.filename, await response.blob());
+      } catch {
+      }
+    }
+    return { path: target.path, size: file.size };
+  }
+
+  // src/settings.js
+  var SETTINGS_KEY = "rplaySettings";
+  var SAVE_MODES = Object.freeze(["folder", "ask"]);
+  var EMBY_MEDIA_TYPES = Object.freeze(["tv", "movie"]);
+  var DEFAULT_SETTINGS = Object.freeze({
+    saveMode: "folder",
+    defaultFolder: "RPlay",
+    outputTemplate: DEFAULT_OUTPUT_TEMPLATE,
+    embyEnabled: true,
+    embyMediaType: "tv",
+    embyNfo: true,
+    embyImages: true,
+    useCustomDirectory: false
+  });
+  function normalizeString(value, fallback, { allowEmpty = true, limit = 512 } = {}) {
+    if (typeof value !== "string") return fallback;
+    const trimmed = value.replace(/\r\n?/g, "\n");
+    const result = allowEmpty ? trimmed : trimmed.trim();
+    if (!allowEmpty && result.trim() === "") return fallback;
+    return [...result].slice(0, limit).join("");
+  }
+  function normalizeSettings(raw) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    return {
+      saveMode: SAVE_MODES.includes(source.saveMode) ? source.saveMode : DEFAULT_SETTINGS.saveMode,
+      defaultFolder: normalizeString(source.defaultFolder, DEFAULT_SETTINGS.defaultFolder),
+      outputTemplate: normalizeString(source.outputTemplate, DEFAULT_SETTINGS.outputTemplate, { allowEmpty: false }),
+      embyEnabled: typeof source.embyEnabled === "boolean" ? source.embyEnabled : DEFAULT_SETTINGS.embyEnabled,
+      embyMediaType: EMBY_MEDIA_TYPES.includes(source.embyMediaType) ? source.embyMediaType : DEFAULT_SETTINGS.embyMediaType,
+      embyNfo: typeof source.embyNfo === "boolean" ? source.embyNfo : DEFAULT_SETTINGS.embyNfo,
+      embyImages: typeof source.embyImages === "boolean" ? source.embyImages : DEFAULT_SETTINGS.embyImages,
+      useCustomDirectory: typeof source.useCustomDirectory === "boolean" ? source.useCustomDirectory : DEFAULT_SETTINGS.useCustomDirectory
+    };
+  }
+  function storageArea() {
+    if (typeof chrome === "undefined" || !chrome.storage) return null;
+    return chrome.storage.sync || chrome.storage.local || null;
+  }
+  async function loadSettings() {
+    const area = storageArea();
+    if (!area) return { ...DEFAULT_SETTINGS };
+    const stored = await area.get(SETTINGS_KEY).catch(() => ({}));
+    return normalizeSettings(stored?.[SETTINGS_KEY]);
+  }
+
   // src/offscreen.js
   var activeContext = null;
   var readyFiles = /* @__PURE__ */ new Map();
   var cleanupPromise = cleanupStaleFiles();
-  async function exposeReadyFile(task, temp, actualFormat, fallbackReason, context) {
+  async function exposeReadyFile(task, temp, actualFormat, fallbackReason, context, settings) {
     const file = await temp.handle.getFile();
+    const saved = await saveToCustomDirectory(task, actualFormat, settings, file).catch(() => null);
+    if (saved) {
+      await removeTempFile(temp);
+      await chrome.runtime.sendMessage({
+        type: MessageType.OFFSCREEN_FILE_SAVED,
+        taskId: task.taskId,
+        file: { path: saved.path, size: saved.size, actualFormat }
+      });
+      if (activeContext === context) activeContext = null;
+      return;
+    }
     const mimeType = actualFormat === "mp4" ? "video/mp4" : "video/mp2t";
     const filename = makeDownloadFilename(task, actualFormat);
     const namedFile = new File([file], filename, {
@@ -24429,7 +24828,7 @@ ${quote(segment.url)}
         actualFormat === "mp4" ? "MP4 \u5DF2\u751F\u6210\uFF0C\u7B49\u5F85\u4FDD\u5B58\u2026" : "TS \u56DE\u9000\u5DF2\u5B8C\u6210\uFF0C\u7B49\u5F85\u4FDD\u5B58\u2026",
         { actualFormat, fallbackReason }
       );
-      await exposeReadyFile(task, temp, actualFormat, fallbackReason, context);
+      await exposeReadyFile(task, temp, actualFormat, fallbackReason, context, await loadSettings());
     } catch (error) {
       if (activeContext === context) activeContext = null;
       if (isAbortError(error) || context.controller.signal.aborted) {
@@ -24454,6 +24853,22 @@ ${quote(segment.url)}
   function cancelActiveTask(taskId) {
     if (!activeContext || activeContext.taskId !== taskId) return false;
     return abortDownloadContext(activeContext);
+  }
+  function writeTextFile(request) {
+    const blob = new Blob([request.content ?? ""], {
+      type: request.mimeType || "application/xml;charset=utf-8"
+    });
+    const objectUrl = URL.createObjectURL(blob);
+    readyFiles.set(request.taskId, { objectUrl, tempName: null, filename: request.name || "file", size: blob.size });
+    return objectUrl;
+  }
+  async function fetchMediaFile(request) {
+    const response = await fetch(request.url, { credentials: "include" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    readyFiles.set(request.taskId, { objectUrl, tempName: null, filename: request.name || "file", size: blob.size });
+    return objectUrl;
   }
   async function releaseFile(request) {
     const ready = readyFiles.get(request.taskId);
@@ -24482,6 +24897,18 @@ ${quote(segment.url)}
         fileReady: activeContext?.fileReady || null
       });
       return false;
+    }
+    if (request.type === MessageType.OFFSCREEN_WRITE_FILE) {
+      try {
+        sendResponse({ objectUrl: writeTextFile(request) });
+      } catch (error) {
+        sendResponse({ error: error?.message || String(error) });
+      }
+      return false;
+    }
+    if (request.type === MessageType.OFFSCREEN_FETCH_FILE) {
+      fetchMediaFile(request).then((objectUrl) => sendResponse({ objectUrl })).catch((error) => sendResponse({ error: error?.message || String(error) }));
+      return true;
     }
     const action = request.type === MessageType.OFFSCREEN_CANCEL ? Promise.resolve(cancelActiveTask(request.taskId)) : releaseFile(request);
     action.then((success) => sendResponse({ success })).catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));

@@ -11,6 +11,7 @@ let currentTabId = null;
 let currentTasks = [];
 let videos = [];
 let currentPageTitle = '';
+let currentPageMeta = {};
 let videoLoadVersion = 0;
 let pageTitleLoadVersion = 0;
 
@@ -43,6 +44,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       pageTitleLoadVersion += 1;
       videos = [];
       currentPageTitle = '';
+      currentPageMeta = {};
       render();
       return;
     }
@@ -98,7 +100,10 @@ async function loadPageTitle() {
   const pageInfo = await chrome.tabs.sendMessage(currentTabId, {
     type: MessageType.GET_PAGE_VIDEO_TITLE,
   }).catch(() => null);
-  if (version === pageTitleLoadVersion) currentPageTitle = normalizeVideoTitle(pageInfo?.title);
+  if (version === pageTitleLoadVersion) {
+    currentPageTitle = normalizeVideoTitle(pageInfo?.title);
+    currentPageMeta = pageInfo || {};
+  }
 }
 
 function upsertTask(task) {
@@ -340,6 +345,8 @@ async function startDownload(video, stream, sourceId, button) {
   }).catch(() => null);
   const liveTitle = normalizeVideoTitle(pageInfo?.title);
   if (liveTitle) currentPageTitle = liveTitle;
+  if (pageInfo) currentPageMeta = pageInfo;
+  const meta = currentPageMeta || {};
   const response = await chrome.runtime.sendMessage({
     type: MessageType.DOWNLOAD_VIDEO,
     tabId: currentTabId,
@@ -356,9 +363,17 @@ async function startDownload(video, stream, sourceId, button) {
       width: stream.width,
       height: stream.height,
       bandwidth: stream.bandwidth,
-      duration: video.duration,
+      duration: video.duration || meta.duration || null,
       hasExternalAudio: stream.hasExternalAudio,
       sessionKeys: video.sessionKeys || [],
+      channel: meta.channel || null,
+      channelId: meta.channelId || null,
+      videoId: meta.videoId || null,
+      releaseDate: meta.releaseDate || null,
+      description: meta.description || null,
+      posterUrl: meta.posterUrl || null,
+      fanartUrl: meta.fanartUrl || null,
+      thumbUrl: meta.thumbUrl || null,
     },
   }).catch((error) => ({ success: false, error: error?.message || String(error) }));
   if (!response?.success) {

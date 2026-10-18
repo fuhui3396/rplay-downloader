@@ -1,6 +1,8 @@
 import { createSourceId, estimateMediaBytes } from './media.js';
 import { LICENSE_STORAGE_PREFIX, isWidevineLicenseUrl } from './cdm-client.js';
-import { makeDownloadFilename, normalizeVideoTitle } from './naming.js';
+import { buildDownloadPath, normalizeVideoTitle } from './naming.js';
+import { DEFAULT_SETTINGS, SETTINGS_KEY, loadSettings, normalizeSettings } from './settings.js';
+import { buildSidecarPlan } from './sidecars.js';
 import {
   ACTIVE_TASK_PHASES,
   BACKGROUND_MESSAGE_TYPES,
@@ -31,9 +33,11 @@ const cmafTitleRequests = new Map();
 const queue = [];
 const pendingDownloads = new Map();
 const pendingFilenamesByUrl = new Map();
+const pendingSidecarReleases = new Map();
 let activeTaskId = null;
 let offscreenCreation = null;
 let processingQueue = false;
+let settings = { ...DEFAULT_SETTINGS };
 
 const taskStore = new TaskStore({
   storageArea: chrome.storage.session,
@@ -136,6 +140,7 @@ async function resolvePageTitle(tabId) {
 
 async function bootstrap() {
   await taskStore.restore();
+  settings = await loadSettings();
   let migrated = false;
   for (const task of tasks.values()) {
     if (!task.sourceId && task.masterUrl && task.streamUrl) {
@@ -274,6 +279,14 @@ async function createDownloadTask(request) {
     bandwidth,
     duration,
     estimatedBytes,
+    channel: data.channel || null,
+    channelId: data.channelId || null,
+    videoId: data.videoId || null,
+    releaseDate: data.releaseDate || null,
+    description: data.description || null,
+    posterUrl: data.posterUrl || null,
+    fanartUrl: data.fanartUrl || null,
+    thumbUrl: data.thumbUrl || null,
     sourceType: detectedVideo?.sourceType || data.sourceType || 'hls',
     licenseUrl: isWidevineLicenseUrl(licenseUrl) ? licenseUrl : null,
     representationId: detectedStream?.representationId || data.representationId || null,
@@ -343,7 +356,7 @@ async function processQueue() {
 async function beginBrowserDownload(taskId, fileReady) {
   const task = tasks.get(taskId);
   if (!task || TERMINAL_TASK_PHASES.has(task.phase) || task.browserDownloadId) return;
-  const filename = makeDownloadFilename(task, fileReady.actualFormat);
+  const filename = buildDownloadPath(task, fileReady.actualFormat, settings).path;
 
   await updateTask(taskId, {
     phase: TaskPhase.SAVING,
@@ -365,7 +378,7 @@ async function beginBrowserDownload(taskId, fileReady) {
     const downloadId = await chrome.downloads.download({
       url: fileReady.objectUrl,
       filename,
-      saveAs: true,
+      saveAs: settings.saveMode === 'ask',
       conflictAction: 'uniquify',
     });
     const current = tasks.get(taskId);
@@ -381,6 +394,34 @@ async function beginBrowserDownload(taskId, fileReady) {
   }
 }
 
+async function completeSavedTask(taskId, file) {
+  const task = tasks.get(taskId);
+  if (!task || TERMINAL_TASK_PHASES.has(task.phase)) return;
+  const completedAt = Date.now();
+  const elapsedSeconds = Math.max(0.001, (completedAt - (task.startedAt || task.createdAt)) / 1000);
+  const size = Number(file?.size) || 0;
+  await updateTask(taskId, {
+    phase: TaskPhase.COMPLETED,
+    progress: 100,
+    speed: 0,
+    actualFormat: file?.actualFormat || task.actualFormat,
+    filename: file?.path || task.filename,
+    downloadedBytes: size,
+    totalBytes: size,
+    message: '已保存到自定义目录',
+    completedAt,
+    totalTime: elapsedSeconds,
+    avgSpeed: size / elapsedSeconds,
+    licenseUrl: null,
+    objectUrl: null,
+    tempName: null,
+  }, MessageType.TASK_COMPLETED, { validateTransition: false });
+  await updateBadge('✓', '#28a745', task.tabId);
+  activeTaskId = null;
+  setTimeout(() => updateBadge(String(videoInfo.get(task.tabId)?.length || ''), '#666666', task.tabId), 3_000);
+  void processQueue();
+}
+
 async function releaseTaskFile(task) {
   if (!task?.objectUrl && !task?.tempName) return;
   await sendToOffscreen({
@@ -389,6 +430,86 @@ async function releaseTaskFile(task) {
     objectUrl: task.objectUrl,
     tempName: task.tempName,
   }).catch(() => {});
+}
+
+async function releaseSidecarFile(key, objectUrl) {
+  if (!(await getOffscreenContext())) return;
+  await chrome.runtime.sendMessage({
+    type: MessageType.OFFSCREEN_RELEASE_FILE,
+    taskId: key,
+    objectUrl,
+  }).catch(() => {});
+}
+
+// The downloads listener only preserves the requested filename when it can
+// find it in pendingFilenamesByUrl, so every sidecar must register the exact
+// URL (blob or remote) it downloads from before starting.
+async function startSidecarDownload({ key, filename, conflictAction, url, blobUrl }) {
+  pendingFilenamesByUrl.set(url, filename);
+  try {
+    const downloadId = await chrome.downloads.download({
+      url,
+      filename,
+      conflictAction: conflictAction || 'uniquify',
+      saveAs: false,
+    });
+    if (blobUrl) pendingSidecarReleases.set(downloadId, { key, objectUrl: blobUrl });
+  } catch {
+    pendingFilenamesByUrl.delete(url);
+    if (blobUrl) await releaseSidecarFile(key, blobUrl);
+  }
+}
+
+async function writeSidecarFile(taskId, file) {
+  const key = `${taskId}:${file.filename}`;
+  const response = await sendToOffscreen({
+    type: MessageType.OFFSCREEN_WRITE_FILE,
+    taskId: key,
+    name: file.filename.split('/').pop(),
+    mimeType: 'application/xml;charset=utf-8',
+    content: file.content,
+  }).catch(() => null);
+  if (!response?.objectUrl) return;
+  await startSidecarDownload({
+    key,
+    filename: file.filename,
+    conflictAction: file.conflictAction,
+    url: response.objectUrl,
+    blobUrl: response.objectUrl,
+  });
+}
+
+async function downloadSidecarImage(task, image) {
+  const key = `${task.taskId}:${image.filename}`;
+  // Route through offscreen so each file gets a unique blob URL even when the
+  // same source image is reused for poster, fanart and thumb.
+  const response = await sendToOffscreen({
+    type: MessageType.OFFSCREEN_FETCH_FILE,
+    taskId: key,
+    name: image.filename.split('/').pop(),
+    url: image.url,
+  }).catch(() => null);
+  if (response?.objectUrl) {
+    await startSidecarDownload({
+      key,
+      filename: image.filename,
+      url: response.objectUrl,
+      blobUrl: response.objectUrl,
+    });
+    return;
+  }
+  await startSidecarDownload({ key, filename: image.filename, url: image.url });
+}
+
+async function downloadSidecars(task, extension) {
+  if (!task || !settings.embyEnabled) return;
+  const target = buildDownloadPath(task, extension || task.actualFormat || 'mp4', settings);
+  const plan = buildSidecarPlan(task, settings, target);
+  const writes = plan.files.map((file) => writeSidecarFile(task.taskId, file).catch(() => {}));
+  for (const image of plan.images) {
+    writes.push(downloadSidecarImage(task, image).catch(() => {}));
+  }
+  await Promise.allSettled(writes);
 }
 
 async function finishTask(taskId) {
@@ -414,6 +535,7 @@ async function finishTask(taskId) {
   await updateBadge('✓', '#28a745', task.tabId);
   activeTaskId = null;
   setTimeout(() => updateBadge(String(videoInfo.get(task.tabId)?.length || ''), '#666666', task.tabId), 3_000);
+  void downloadSidecars(task);
   void processQueue();
 }
 
@@ -543,6 +665,9 @@ async function handleMessage(request) {
     case MessageType.OFFSCREEN_FILE_READY:
       void beginBrowserDownload(request.taskId, request.file);
       return { accepted: true };
+    case MessageType.OFFSCREEN_FILE_SAVED:
+      void completeSavedTask(request.taskId, request.file);
+      return { accepted: true };
     case MessageType.OFFSCREEN_ERROR:
       await failTask(request.taskId, request.error || '后台下载失败');
       return { accepted: true };
@@ -577,11 +702,21 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
 
 chrome.downloads.onChanged.addListener((delta) => {
   if (!delta.state) return;
+  const sidecar = pendingSidecarReleases.get(delta.id);
+  if (sidecar && (delta.state.current === 'complete' || delta.state.current === 'interrupted')) {
+    pendingSidecarReleases.delete(delta.id);
+    void releaseSidecarFile(sidecar.key, sidecar.objectUrl);
+  }
   const taskId = pendingDownloads.get(delta.id)
     || [...tasks.values()].find((task) => task.browserDownloadId === delta.id)?.taskId;
   if (!taskId) return;
   if (delta.state.current === 'complete') void finishTask(taskId);
   if (delta.state.current === 'interrupted') void failTask(taskId, '浏览器保存已取消或中断');
+});
+
+chrome.storage.onChanged?.addListener((changes) => {
+  if (!changes?.[SETTINGS_KEY]) return;
+  settings = normalizeSettings(changes[SETTINGS_KEY].newValue);
 });
 
 chrome.webRequest.onBeforeRequest.addListener(

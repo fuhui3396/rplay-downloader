@@ -335,5 +335,107 @@
   },
   "drmRestoreFailed": {
     "message": "Could not restore the included device. Your current device is unchanged. Reload the extension and try again."
+  },
+  "namingTitle": {
+    "message": "Saving & naming"
+  },
+  "namingHelp": {
+    "message": "Choose where downloads go and how they are named, with yt-dlp-style output templates."
+  },
+  "namingFolder": {
+    "message": "Default folder"
+  },
+  "namingFolderHint": {
+    "message": "A subfolder under the browser download directory. Leave empty for the root. Absolute paths are not allowed by the browser."
+  },
+  "namingTemplate": {
+    "message": "Output template"
+  },
+  "namingTemplateHint": {
+    "message": "Supports %(title)s, %(id)s, %(channel)s, %(channel_id)s, %(upload_date)s, %(release_date)s, %(resolution)s, %(ext)s; use | for defaults, > to format dates and .NB to truncate bytes."
+  },
+  "namingPreview": {
+    "message": "Preview"
+  },
+  "namingSaveMode": {
+    "message": "Save mode"
+  },
+  "namingSaveFolder": {
+    "message": "Save directly to the default folder"
+  },
+  "namingSaveAsk": {
+    "message": "Ask where to save each time"
+  },
+  "namingReset": {
+    "message": "Reset to default"
+  },
+  "namingSaved": {
+    "message": "Saved"
+  },
+  "embyTitle": {
+    "message": "Emby metadata"
+  },
+  "embyOptional": {
+    "message": "Optional"
+  },
+  "embyHelp": {
+    "message": "Create NFO and image files alongside videos so Emby / Jellyfin can read them directly."
+  },
+  "embyEnable": {
+    "message": "Generate Emby metadata"
+  },
+  "embyMediaType": {
+    "message": "Media type"
+  },
+  "embyTypeTv": {
+    "message": "TV series"
+  },
+  "embyTypeMovie": {
+    "message": "Movie"
+  },
+  "embyNfoEnable": {
+    "message": "Create NFO files"
+  },
+  "embyImagesEnable": {
+    "message": "Download poster / fanart / thumb images"
+  },
+  "embyHint": {
+    "message": "Poster and plot are best-effort scraped from the page's Open Graph / JSON-LD. Missing items are skipped."
+  },
+  "namingDirectory": {
+    "message": "Custom output folder"
+  },
+  "namingPickDirectory": {
+    "message": "Choose folder…"
+  },
+  "namingClearDirectory": {
+    "message": "Clear"
+  },
+  "namingDirectoryHint": {
+    "message": "When set, videos and NFO / images are written directly into this folder (any drive). Requires browser authorization and may need re-selecting after a restart."
+  },
+  "namingDirectoryNone": {
+    "message": "Not set — using the default folder above."
+  },
+  "namingDirectorySelected": {
+    "message": "Current folder: $NAME$",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "Media/RPlay"
+      }
+    }
+  },
+  "namingDirectoryPermission": {
+    "message": "Folder “$NAME$” needs re-authorization. Please choose it again.",
+    "placeholders": {
+      "name": {
+        "content": "$1",
+        "example": "Media/RPlay"
+      }
+    }
+  },
+  "namingDirectoryUnsupported": {
+    "message": "This browser cannot pick a folder. Use the default folder above instead."
   }
 }

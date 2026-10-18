@@ -49,20 +49,311 @@ ${streamUrl || ""}`;
     }
   }
 
+  // src/output-template.js
+  var DEFAULT_OUTPUT_TEMPLATE = "%(title)s_%(resolution)s_%(upload_date>%Y-%m-%dT%H-%M-%S)s.%(ext)s";
+  var PLACEHOLDER = /^(?:\.(\d+))?([sB])/;
+  function pad(value, length = 2) {
+    return String(value).padStart(length, "0");
+  }
+  function formatDate(date, format) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+    const year = date.getUTCFullYear();
+    const tokens = {
+      "%Y": String(year),
+      "%y": pad(year % 100),
+      "%m": pad(date.getUTCMonth() + 1),
+      "%d": pad(date.getUTCDate()),
+      "%H": pad(date.getUTCHours()),
+      "%M": pad(date.getUTCMinutes()),
+      "%S": pad(date.getUTCSeconds()),
+      "%j": pad(Math.floor((Date.UTC(year, date.getUTCMonth(), date.getUTCDate()) - Date.UTC(year, 0, 0)) / 864e5), 3),
+      "%%": "%"
+    };
+    return String(format).replace(/%[YymdHMSj%]/g, (token) => tokens[token] ?? token);
+  }
+  function truncateCharacters(value, limit) {
+    return [...value].slice(0, limit).join("");
+  }
+  function truncateBytes(value, limit) {
+    const bytes = new TextEncoder().encode(value);
+    if (bytes.length <= limit) return value;
+    let end = limit;
+    while (end > 0 && (bytes[end] & 192) === 128) end -= 1;
+    return new TextDecoder().decode(bytes.subarray(0, end));
+  }
+  function resolveExpression(fields, expression) {
+    const gt = expression.indexOf(">");
+    const name = (gt >= 0 ? expression.slice(0, gt) : expression).trim();
+    const format = gt >= 0 ? expression.slice(gt + 1) : null;
+    const raw = fields[name];
+    if (raw === void 0 || raw === null) return "";
+    if (raw instanceof Date) return formatDate(raw, format || "%Y%m%d");
+    return String(raw);
+  }
+  function renderField(body, limit, fields) {
+    const separator = body.indexOf("|");
+    const expressions = separator >= 0 ? body.slice(0, separator) : body;
+    const fallback = separator >= 0 ? body.slice(separator + 1) : null;
+    let value = "";
+    for (const alternative of expressions.split(",")) {
+      value = resolveExpression(fields, alternative);
+      if (value !== "") break;
+    }
+    if (value === "" && fallback !== null) value = fallback;
+    if (value === "" || !limit) return value;
+    return limit.bytes ? truncateBytes(value, limit.value) : truncateCharacters(value, limit.value);
+  }
+  function renderTemplate(template, fields = {}) {
+    const source = String(template ?? "");
+    let output = "";
+    let cursor = 0;
+    while (cursor < source.length) {
+      const start = source.indexOf("%(", cursor);
+      if (start < 0) {
+        output += source.slice(cursor);
+        break;
+      }
+      const end = source.indexOf(")", start + 2);
+      if (end < 0) {
+        output += source.slice(cursor);
+        break;
+      }
+      const spec = PLACEHOLDER.exec(source.slice(end + 1));
+      if (!spec) {
+        output += source.slice(cursor, end + 1);
+        cursor = end + 1;
+        continue;
+      }
+      const limit = spec[1] ? { value: Number(spec[1]), bytes: spec[2] === "B" } : null;
+      output += source.slice(cursor, start);
+      output += renderField(source.slice(start + 2, end), limit, fields);
+      cursor = end + 1 + spec[0].length;
+    }
+    return output;
+  }
+
   // src/naming.js
   function normalizeVideoTitle(value) {
     const normalized = String(value || "").normalize("NFC").replace(/\s+/g, " ").replace(/\s*[|｜]\s*RPLAY\s*$/i, "").trim();
     return /^(?:rplay|rplay\.live)$/i.test(normalized) ? "" : normalized;
   }
-  function sanitizeFilename(value) {
-    const cleaned = normalizeVideoTitle(value || "rplay").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
-    return [...cleaned || "rplay"].slice(0, 100).join("");
+  var RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+  function sanitizePathSegment(value) {
+    const cleaned = String(value ?? "").normalize("NFC").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/^\.+/, "").replace(/[. ]+$/g, "").trim();
+    if (!cleaned || RESERVED_NAMES.test(cleaned)) return cleaned ? `_${cleaned}` : "";
+    return [...cleaned].slice(0, 120).join("");
   }
-  function makeDownloadFilename(task, extension) {
-    const title = sanitizeFilename(task.title || "rplay");
-    const resolution = sanitizeFilename(task.resolution || "video");
-    const timestamp = new Date(task.createdAt).toISOString().replace(/[:.]/g, "-");
-    return `${title}_${resolution}_${timestamp}.${extension}`;
+  function toDate(value) {
+    if (!value) return "";
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? "" : date;
+  }
+  function asFieldText(value) {
+    return String(value ?? "").replace(/[\\/]+/g, "_");
+  }
+  function buildTemplateFields(task, extension) {
+    return {
+      title: asFieldText(normalizeVideoTitle(task?.title) || "rplay"),
+      id: asFieldText(task?.videoId || ""),
+      channel: asFieldText(task?.channel || ""),
+      channel_id: asFieldText(task?.channelId || ""),
+      upload_date: toDate(task?.createdAt),
+      release_date: toDate(task?.releaseDate),
+      resolution: asFieldText(task?.resolution || ""),
+      width: task?.width || "",
+      height: task?.height || "",
+      duration: Number.isFinite(task?.duration) ? Math.round(task.duration) : "",
+      ext: asFieldText(extension || "mp4")
+    };
+  }
+  function splitSegments(value) {
+    return String(value ?? "").split(/[\\/]+/);
+  }
+  function joinPath(segments) {
+    return segments.join("/");
+  }
+  function buildDownloadPath(task, extension, settings2) {
+    const fields = buildTemplateFields(task, extension);
+    const template = settings2?.outputTemplate || DEFAULT_OUTPUT_TEMPLATE;
+    const folderSegments = splitSegments(settings2?.defaultFolder || "").map(sanitizePathSegment).filter(Boolean);
+    const extensionSuffix = `.${fields.ext}`;
+    const render = (candidate) => {
+      const segments = splitSegments(renderTemplate(candidate, fields)).map(sanitizePathSegment).filter(Boolean);
+      const name = segments.pop() || "";
+      if (!name) return;
+      const filename = name.toLowerCase().endsWith(extensionSuffix.toLowerCase()) ? name : `${name}${extensionSuffix}`;
+      const directory = joinPath([...folderSegments, ...segments].filter(Boolean));
+      const path = joinPath([directory, filename].filter(Boolean));
+      return { path, directory, name: filename, basename: filename.slice(0, filename.length - extensionSuffix.length) };
+    };
+    return render(template) || render(DEFAULT_OUTPUT_TEMPLATE) || {
+      path: `rplay_${fields.ext}`,
+      directory: "",
+      name: `rplay_${fields.ext}`,
+      basename: "rplay"
+    };
+  }
+
+  // src/settings.js
+  var SETTINGS_KEY = "rplaySettings";
+  var SAVE_MODES = Object.freeze(["folder", "ask"]);
+  var EMBY_MEDIA_TYPES = Object.freeze(["tv", "movie"]);
+  var DEFAULT_SETTINGS = Object.freeze({
+    saveMode: "folder",
+    defaultFolder: "RPlay",
+    outputTemplate: DEFAULT_OUTPUT_TEMPLATE,
+    embyEnabled: true,
+    embyMediaType: "tv",
+    embyNfo: true,
+    embyImages: true,
+    useCustomDirectory: false
+  });
+  function normalizeString(value, fallback, { allowEmpty = true, limit = 512 } = {}) {
+    if (typeof value !== "string") return fallback;
+    const trimmed = value.replace(/\r\n?/g, "\n");
+    const result = allowEmpty ? trimmed : trimmed.trim();
+    if (!allowEmpty && result.trim() === "") return fallback;
+    return [...result].slice(0, limit).join("");
+  }
+  function normalizeSettings(raw) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    return {
+      saveMode: SAVE_MODES.includes(source.saveMode) ? source.saveMode : DEFAULT_SETTINGS.saveMode,
+      defaultFolder: normalizeString(source.defaultFolder, DEFAULT_SETTINGS.defaultFolder),
+      outputTemplate: normalizeString(source.outputTemplate, DEFAULT_SETTINGS.outputTemplate, { allowEmpty: false }),
+      embyEnabled: typeof source.embyEnabled === "boolean" ? source.embyEnabled : DEFAULT_SETTINGS.embyEnabled,
+      embyMediaType: EMBY_MEDIA_TYPES.includes(source.embyMediaType) ? source.embyMediaType : DEFAULT_SETTINGS.embyMediaType,
+      embyNfo: typeof source.embyNfo === "boolean" ? source.embyNfo : DEFAULT_SETTINGS.embyNfo,
+      embyImages: typeof source.embyImages === "boolean" ? source.embyImages : DEFAULT_SETTINGS.embyImages,
+      useCustomDirectory: typeof source.useCustomDirectory === "boolean" ? source.useCustomDirectory : DEFAULT_SETTINGS.useCustomDirectory
+    };
+  }
+  function storageArea() {
+    if (typeof chrome === "undefined" || !chrome.storage) return null;
+    return chrome.storage.sync || chrome.storage.local || null;
+  }
+  async function loadSettings() {
+    const area = storageArea();
+    if (!area) return { ...DEFAULT_SETTINGS };
+    const stored = await area.get(SETTINGS_KEY).catch(() => ({}));
+    return normalizeSettings(stored?.[SETTINGS_KEY]);
+  }
+
+  // src/sidecars.js
+  function xmlEscape(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&apos;"
+    })[character]);
+  }
+  function tag(name, value) {
+    const text = String(value ?? "").trim();
+    return text ? `  <${name}>${xmlEscape(text)}</${name}>` : "";
+  }
+  function uniqueIdTag(task) {
+    return task.videoId ? `  <uniqueid type="rplay" default="true">${xmlEscape(task.videoId)}</uniqueid>` : "";
+  }
+  function runtimeMinutes(duration) {
+    return Number.isFinite(duration) && duration > 0 ? Math.max(1, Math.round(duration / 60)) : "";
+  }
+  function episodeInfo(task) {
+    const value = task.releaseDate || task.createdAt;
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return {
+      season: date.getUTCFullYear(),
+      episode: (date.getUTCMonth() + 1) * 100 + date.getUTCDate(),
+      aired: formatDate(date, "%Y-%m-%d")
+    };
+  }
+  function buildXml(root, lines) {
+    return [
+      '<?xml version="1.0" encoding="utf-8" standalone="yes"?>',
+      `<${root}>`,
+      ...lines.filter(Boolean),
+      `</${root}>`,
+      ""
+    ].join("\n");
+  }
+  function seriesDirectories(directory) {
+    if (!directory) return { seriesDir: "", seasonDir: "" };
+    const segments = directory.split("/");
+    if (/^season[\s._-]*\d*$/i.test(segments[segments.length - 1] || "")) {
+      return { seriesDir: segments.slice(0, -1).join("/"), seasonDir: directory };
+    }
+    return { seriesDir: directory, seasonDir: "" };
+  }
+  function buildItemNfo(task, settings2) {
+    const info = episodeInfo(task);
+    const description = task.description || "";
+    if (settings2.embyMediaType === "movie") {
+      return buildXml("movie", [
+        tag("title", task.title),
+        tag("originaltitle", task.title),
+        tag("plot", description),
+        tag("outline", description),
+        tag("studio", task.channel),
+        uniqueIdTag(task),
+        tag("premiered", info?.aired),
+        tag("releasedate", info?.aired),
+        tag("runtime", runtimeMinutes(task.duration))
+      ]);
+    }
+    return buildXml("episodedetails", [
+      tag("title", task.title),
+      tag("showtitle", task.channel || task.title),
+      tag("season", info?.season),
+      tag("episode", info?.episode),
+      tag("plot", description),
+      tag("aired", info?.aired),
+      tag("runtime", runtimeMinutes(task.duration)),
+      tag("studio", task.channel),
+      uniqueIdTag(task)
+    ]);
+  }
+  function buildTvShowNfo(task) {
+    return buildXml("tvshow", [
+      tag("title", task.channel || task.title),
+      tag("plot", task.description),
+      tag("studio", task.channel),
+      task.channelId ? `  <uniqueid type="rplay" default="true">${xmlEscape(task.channelId)}</uniqueid>` : ""
+    ]);
+  }
+  function buildSeasonNfo(task) {
+    const info = episodeInfo(task);
+    return buildXml("season", [tag("seasonnumber", info?.season)]);
+  }
+  function buildSidecarPlan(task, settings2, target) {
+    if (!target || !target.basename) return { files: [], images: [] };
+    const directory = target.directory;
+    const base = directory ? `${directory}/${target.basename}` : target.basename;
+    const files = [];
+    const images = [];
+    if (settings2.embyImages) {
+      const poster = task.posterUrl || task.thumbUrl || "";
+      const fanart = task.fanartUrl || task.posterUrl || task.thumbUrl || "";
+      const thumb = task.thumbUrl || task.posterUrl || "";
+      if (poster) images.push({ filename: `${base}-poster.jpg`, url: poster });
+      if (fanart) images.push({ filename: `${base}-fanart.jpg`, url: fanart });
+      if (thumb) images.push({ filename: `${base}-thumb.jpg`, url: thumb });
+    }
+    if (settings2.embyNfo) {
+      files.push({ filename: `${base}.nfo`, content: buildItemNfo(task, settings2), conflictAction: "uniquify" });
+      if (settings2.embyMediaType === "tv") {
+        const { seriesDir, seasonDir } = seriesDirectories(directory);
+        if (seriesDir) {
+          files.push({ filename: `${seriesDir}/tvshow.nfo`, content: buildTvShowNfo(task), conflictAction: "overwrite" });
+        }
+        if (seasonDir) {
+          files.push({ filename: `${seasonDir}/season.nfo`, content: buildSeasonNfo(task), conflictAction: "overwrite" });
+        }
+      }
+    }
+    return { files, images };
   }
 
   // src/protocol.js
@@ -119,8 +410,11 @@ ${streamUrl || ""}`;
     OFFSCREEN_CANCEL: "OFFSCREEN_CANCEL",
     OFFSCREEN_STATUS: "OFFSCREEN_STATUS",
     OFFSCREEN_RELEASE_FILE: "OFFSCREEN_RELEASE_FILE",
+    OFFSCREEN_WRITE_FILE: "OFFSCREEN_WRITE_FILE",
+    OFFSCREEN_FETCH_FILE: "OFFSCREEN_FETCH_FILE",
     OFFSCREEN_PROGRESS: "OFFSCREEN_PROGRESS",
     OFFSCREEN_FILE_READY: "OFFSCREEN_FILE_READY",
+    OFFSCREEN_FILE_SAVED: "OFFSCREEN_FILE_SAVED",
     OFFSCREEN_ERROR: "OFFSCREEN_ERROR",
     OFFSCREEN_CANCELED: "OFFSCREEN_CANCELED"
   });
@@ -133,6 +427,7 @@ ${streamUrl || ""}`;
     MessageType.OPEN_POPUP,
     MessageType.OFFSCREEN_PROGRESS,
     MessageType.OFFSCREEN_FILE_READY,
+    MessageType.OFFSCREEN_FILE_SAVED,
     MessageType.OFFSCREEN_ERROR,
     MessageType.OFFSCREEN_CANCELED
   ]);
@@ -140,7 +435,9 @@ ${streamUrl || ""}`;
     MessageType.OFFSCREEN_START,
     MessageType.OFFSCREEN_CANCEL,
     MessageType.OFFSCREEN_STATUS,
-    MessageType.OFFSCREEN_RELEASE_FILE
+    MessageType.OFFSCREEN_RELEASE_FILE,
+    MessageType.OFFSCREEN_WRITE_FILE,
+    MessageType.OFFSCREEN_FETCH_FILE
   ]);
   var TASK_EVENT_MESSAGE_TYPES = /* @__PURE__ */ new Set([
     MessageType.TASK_CREATED,
@@ -167,9 +464,9 @@ ${streamUrl || ""}`;
     );
   }
   var TaskStore = class {
-    constructor({ storageArea, storageKey, terminalPhases, onEvent = () => {
+    constructor({ storageArea: storageArea2, storageKey, terminalPhases, onEvent = () => {
     }, now = Date.now }) {
-      this.storageArea = storageArea;
+      this.storageArea = storageArea2;
       this.storageKey = storageKey;
       this.terminalPhases = terminalPhases;
       this.onEvent = onEvent;
@@ -2058,7 +2355,7 @@ ${streamUrl || ""}`;
           throw new Error(`Invalid namespace in pattern: ${part}`);
         }
       }
-      let tag = void 0;
+      let tag2 = void 0;
       let positionMatch = null;
       if (tagAndPosition.includes(":")) {
         const colonIndex = tagAndPosition.lastIndexOf(":");
@@ -2066,18 +2363,18 @@ ${streamUrl || ""}`;
         const posPart = tagAndPosition.substring(colonIndex + 1).trim();
         const isPositionKeyword = ["first", "last", "odd", "even"].includes(posPart) || /^nth\(\d+\)$/.test(posPart);
         if (isPositionKeyword) {
-          tag = tagPart;
+          tag2 = tagPart;
           positionMatch = posPart;
         } else {
-          tag = tagAndPosition;
+          tag2 = tagAndPosition;
         }
       } else {
-        tag = tagAndPosition;
+        tag2 = tagAndPosition;
       }
-      if (!tag) {
+      if (!tag2) {
         throw new Error(`Invalid segment pattern: ${part}`);
       }
-      segment.tag = tag;
+      segment.tag = tag2;
       if (namespace) {
         segment.namespace = namespace;
       }
@@ -2171,9 +2468,9 @@ ${streamUrl || ""}`;
       if (expression.hasDeepWildcard()) {
         const lastSeg2 = expression.segments[expression.segments.length - 1];
         if (lastSeg2 && lastSeg2.type !== "deep-wildcard" && lastSeg2.tag !== "*") {
-          const tag2 = lastSeg2.tag;
-          if (!this._deepByTerminalTag.has(tag2)) this._deepByTerminalTag.set(tag2, []);
-          this._deepByTerminalTag.get(tag2).push(expression);
+          const tag3 = lastSeg2.tag;
+          if (!this._deepByTerminalTag.has(tag3)) this._deepByTerminalTag.set(tag3, []);
+          this._deepByTerminalTag.get(tag3).push(expression);
         } else {
           this._deepWildcards.push(expression);
         }
@@ -2181,12 +2478,12 @@ ${streamUrl || ""}`;
       }
       const depth = expression.length;
       const lastSeg = expression.segments[expression.segments.length - 1];
-      const tag = lastSeg?.tag;
-      if (!tag || tag === "*") {
+      const tag2 = lastSeg?.tag;
+      if (!tag2 || tag2 === "*") {
         if (!this._wildcardByDepth.has(depth)) this._wildcardByDepth.set(depth, []);
         this._wildcardByDepth.get(depth).push(expression);
       } else {
-        const key = `${depth}:${tag}`;
+        const key = `${depth}:${tag2}`;
         if (!this._byDepthAndTag.has(key)) this._byDepthAndTag.set(key, []);
         this._byDepthAndTag.get(key).push(expression);
       }
@@ -2280,8 +2577,8 @@ ${streamUrl || ""}`;
     */
     findMatch(matcher) {
       const depth = matcher.getDepth();
-      const tag = matcher.getCurrentTag();
-      const exactKey = `${depth}:${tag}`;
+      const tag2 = matcher.getCurrentTag();
+      const exactKey = `${depth}:${tag2}`;
       const exactBucket = this._byDepthAndTag.get(exactKey);
       if (exactBucket) {
         for (let i = 0; i < exactBucket.length; i++) {
@@ -2294,7 +2591,7 @@ ${streamUrl || ""}`;
           if (matcher.matches(wildcardBucket[i])) return wildcardBucket[i];
         }
       }
-      const deepBucket = this._deepByTerminalTag.get(tag);
+      const deepBucket = this._deepByTerminalTag.get(tag2);
       if (deepBucket) {
         for (let i = 0; i < deepBucket.length; i++) {
           if (matcher.matches(deepBucket[i])) return deepBucket[i];
@@ -4424,7 +4721,7 @@ ${streamUrl || ""}`;
     let hasContentProtection = false;
     const periods = asArray(document.MPD.Period);
     const presentationUnsupported = document.MPD["@_type"] === "dynamic" || periods.length !== 1 || Boolean(durationSeconds(periods[0]?.["@_start"]));
-    function visit(node, inheritedBases, inherited = {}, tag = "MPD") {
+    function visit(node, inheritedBases, inherited = {}, tag2 = "MPD") {
       if (!node || typeof node !== "object") return;
       if (Object.hasOwn(node, "ContentProtection")) hasContentProtection = true;
       const declaredBases = asArray(node.BaseURL).map((base) => typeof base === "string" ? base : base?.["#text"]).filter((base) => typeof base === "string" && base.trim());
@@ -4462,7 +4759,7 @@ ${streamUrl || ""}`;
           }
         }
       }
-      if (tag === "Representation") {
+      if (tag2 === "Representation") {
         const type = mediaType(attributes, bases);
         if (type) {
           const id = String(node["@_id"] ?? representations.length);
@@ -4750,9 +5047,11 @@ ${streamUrl || ""}`;
   var queue = [];
   var pendingDownloads = /* @__PURE__ */ new Map();
   var pendingFilenamesByUrl = /* @__PURE__ */ new Map();
+  var pendingSidecarReleases = /* @__PURE__ */ new Map();
   var activeTaskId = null;
   var offscreenCreation = null;
   var processingQueue = false;
+  var settings = { ...DEFAULT_SETTINGS };
   var taskStore = new TaskStore({
     storageArea: chrome.storage.session,
     storageKey: TASKS_STORAGE_KEY,
@@ -4842,6 +5141,7 @@ ${streamUrl || ""}`;
   }
   async function bootstrap() {
     await taskStore.restore();
+    settings = await loadSettings();
     let migrated = false;
     for (const task of tasks.values()) {
       if (!task.sourceId && task.masterUrl && task.streamUrl) {
@@ -4965,6 +5265,14 @@ ${streamUrl || ""}`;
       bandwidth,
       duration,
       estimatedBytes,
+      channel: data.channel || null,
+      channelId: data.channelId || null,
+      videoId: data.videoId || null,
+      releaseDate: data.releaseDate || null,
+      description: data.description || null,
+      posterUrl: data.posterUrl || null,
+      fanartUrl: data.fanartUrl || null,
+      thumbUrl: data.thumbUrl || null,
       sourceType: detectedVideo?.sourceType || data.sourceType || "hls",
       licenseUrl: isWidevineLicenseUrl(licenseUrl) ? licenseUrl : null,
       representationId: detectedStream?.representationId || data.representationId || null,
@@ -5029,7 +5337,7 @@ ${streamUrl || ""}`;
   async function beginBrowserDownload(taskId, fileReady) {
     const task = tasks.get(taskId);
     if (!task || TERMINAL_TASK_PHASES.has(task.phase) || task.browserDownloadId) return;
-    const filename = makeDownloadFilename(task, fileReady.actualFormat);
+    const filename = buildDownloadPath(task, fileReady.actualFormat, settings).path;
     await updateTask(taskId, {
       phase: TaskPhase.SAVING,
       actualFormat: fileReady.actualFormat,
@@ -5047,7 +5355,7 @@ ${streamUrl || ""}`;
       const downloadId = await chrome.downloads.download({
         url: fileReady.objectUrl,
         filename,
-        saveAs: true,
+        saveAs: settings.saveMode === "ask",
         conflictAction: "uniquify"
       });
       const current = tasks.get(taskId);
@@ -5063,6 +5371,33 @@ ${streamUrl || ""}`;
       await failTask(taskId, error?.message || "\u7528\u6237\u53D6\u6D88\u4FDD\u5B58");
     }
   }
+  async function completeSavedTask(taskId, file) {
+    const task = tasks.get(taskId);
+    if (!task || TERMINAL_TASK_PHASES.has(task.phase)) return;
+    const completedAt = Date.now();
+    const elapsedSeconds = Math.max(1e-3, (completedAt - (task.startedAt || task.createdAt)) / 1e3);
+    const size = Number(file?.size) || 0;
+    await updateTask(taskId, {
+      phase: TaskPhase.COMPLETED,
+      progress: 100,
+      speed: 0,
+      actualFormat: file?.actualFormat || task.actualFormat,
+      filename: file?.path || task.filename,
+      downloadedBytes: size,
+      totalBytes: size,
+      message: "\u5DF2\u4FDD\u5B58\u5230\u81EA\u5B9A\u4E49\u76EE\u5F55",
+      completedAt,
+      totalTime: elapsedSeconds,
+      avgSpeed: size / elapsedSeconds,
+      licenseUrl: null,
+      objectUrl: null,
+      tempName: null
+    }, MessageType.TASK_COMPLETED, { validateTransition: false });
+    await updateBadge("\u2713", "#28a745", task.tabId);
+    activeTaskId = null;
+    setTimeout(() => updateBadge(String(videoInfo.get(task.tabId)?.length || ""), "#666666", task.tabId), 3e3);
+    void processQueue();
+  }
   async function releaseTaskFile(task) {
     if (!task?.objectUrl && !task?.tempName) return;
     await sendToOffscreen({
@@ -5072,6 +5407,79 @@ ${streamUrl || ""}`;
       tempName: task.tempName
     }).catch(() => {
     });
+  }
+  async function releaseSidecarFile(key, objectUrl) {
+    if (!await getOffscreenContext()) return;
+    await chrome.runtime.sendMessage({
+      type: MessageType.OFFSCREEN_RELEASE_FILE,
+      taskId: key,
+      objectUrl
+    }).catch(() => {
+    });
+  }
+  async function startSidecarDownload({ key, filename, conflictAction, url, blobUrl }) {
+    pendingFilenamesByUrl.set(url, filename);
+    try {
+      const downloadId = await chrome.downloads.download({
+        url,
+        filename,
+        conflictAction: conflictAction || "uniquify",
+        saveAs: false
+      });
+      if (blobUrl) pendingSidecarReleases.set(downloadId, { key, objectUrl: blobUrl });
+    } catch {
+      pendingFilenamesByUrl.delete(url);
+      if (blobUrl) await releaseSidecarFile(key, blobUrl);
+    }
+  }
+  async function writeSidecarFile(taskId, file) {
+    const key = `${taskId}:${file.filename}`;
+    const response = await sendToOffscreen({
+      type: MessageType.OFFSCREEN_WRITE_FILE,
+      taskId: key,
+      name: file.filename.split("/").pop(),
+      mimeType: "application/xml;charset=utf-8",
+      content: file.content
+    }).catch(() => null);
+    if (!response?.objectUrl) return;
+    await startSidecarDownload({
+      key,
+      filename: file.filename,
+      conflictAction: file.conflictAction,
+      url: response.objectUrl,
+      blobUrl: response.objectUrl
+    });
+  }
+  async function downloadSidecarImage(task, image) {
+    const key = `${task.taskId}:${image.filename}`;
+    const response = await sendToOffscreen({
+      type: MessageType.OFFSCREEN_FETCH_FILE,
+      taskId: key,
+      name: image.filename.split("/").pop(),
+      url: image.url
+    }).catch(() => null);
+    if (response?.objectUrl) {
+      await startSidecarDownload({
+        key,
+        filename: image.filename,
+        url: response.objectUrl,
+        blobUrl: response.objectUrl
+      });
+      return;
+    }
+    await startSidecarDownload({ key, filename: image.filename, url: image.url });
+  }
+  async function downloadSidecars(task, extension) {
+    if (!task || !settings.embyEnabled) return;
+    const target = buildDownloadPath(task, extension || task.actualFormat || "mp4", settings);
+    const plan = buildSidecarPlan(task, settings, target);
+    const writes = plan.files.map((file) => writeSidecarFile(task.taskId, file).catch(() => {
+    }));
+    for (const image of plan.images) {
+      writes.push(downloadSidecarImage(task, image).catch(() => {
+      }));
+    }
+    await Promise.allSettled(writes);
   }
   async function finishTask(taskId) {
     const task = tasks.get(taskId);
@@ -5095,6 +5503,7 @@ ${streamUrl || ""}`;
     await updateBadge("\u2713", "#28a745", task.tabId);
     activeTaskId = null;
     setTimeout(() => updateBadge(String(videoInfo.get(task.tabId)?.length || ""), "#666666", task.tabId), 3e3);
+    void downloadSidecars(task);
     void processQueue();
   }
   function releaseTaskSlot(taskId) {
@@ -5214,6 +5623,9 @@ ${streamUrl || ""}`;
       case MessageType.OFFSCREEN_FILE_READY:
         void beginBrowserDownload(request.taskId, request.file);
         return { accepted: true };
+      case MessageType.OFFSCREEN_FILE_SAVED:
+        void completeSavedTask(request.taskId, request.file);
+        return { accepted: true };
       case MessageType.OFFSCREEN_ERROR:
         await failTask(request.taskId, request.error || "\u540E\u53F0\u4E0B\u8F7D\u5931\u8D25");
         return { accepted: true };
@@ -5242,10 +5654,19 @@ ${streamUrl || ""}`;
   });
   chrome.downloads.onChanged.addListener((delta) => {
     if (!delta.state) return;
+    const sidecar = pendingSidecarReleases.get(delta.id);
+    if (sidecar && (delta.state.current === "complete" || delta.state.current === "interrupted")) {
+      pendingSidecarReleases.delete(delta.id);
+      void releaseSidecarFile(sidecar.key, sidecar.objectUrl);
+    }
     const taskId = pendingDownloads.get(delta.id) || [...tasks.values()].find((task) => task.browserDownloadId === delta.id)?.taskId;
     if (!taskId) return;
     if (delta.state.current === "complete") void finishTask(taskId);
     if (delta.state.current === "interrupted") void failTask(taskId, "\u6D4F\u89C8\u5668\u4FDD\u5B58\u5DF2\u53D6\u6D88\u6216\u4E2D\u65AD");
+  });
+  chrome.storage.onChanged?.addListener((changes) => {
+    if (!changes?.[SETTINGS_KEY]) return;
+    settings = normalizeSettings(changes[SETTINGS_KEY].newValue);
   });
   chrome.webRequest.onBeforeRequest.addListener(
     (details) => {

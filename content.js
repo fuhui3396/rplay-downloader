@@ -11,7 +11,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     document.getElementById('rplay-video-notification')?.remove();
   }
   if (request.type === MessageType.GET_PAGE_VIDEO_TITLE) {
-    sendResponse({ title: extractVideoTitle() });
+    sendResponse(extractPageMetadata());
   }
 });
 
@@ -70,6 +70,115 @@ function extractVideoTitle() {
     openGraph?.getAttribute('content'),
     twitter?.getAttribute('content'),
   ]);
+}
+
+function metaContent(selector) {
+  return document.querySelector(selector)?.getAttribute('content')?.trim() || '';
+}
+
+function collectJsonLd() {
+  const nodes = [];
+  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+    let data;
+    try {
+      data = JSON.parse(script.textContent || '');
+    } catch {
+      continue;
+    }
+    if (Array.isArray(data)) nodes.push(...data);
+    else if (data && Array.isArray(data['@graph'])) nodes.push(...data['@graph']);
+    else if (data) nodes.push(data);
+  }
+  return nodes;
+}
+
+function firstUrl(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return firstUrl(value[0]);
+  if (typeof value === 'object') return firstUrl(value.url || value.contentUrl || value['@id']);
+  return '';
+}
+
+function firstText(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function parseIsoDuration(value) {
+  const match = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/i.exec(value.trim());
+  if (!match) return null;
+  const [, days, hours, minutes, seconds] = match;
+  return Math.round(Number(days || 0) * 86_400 + Number(hours || 0) * 3_600
+    + Number(minutes || 0) * 60 + Number(seconds || 0));
+}
+
+function parseDuration(value) {
+  if (Number.isFinite(value)) return Math.round(value);
+  if (typeof value !== 'string' || !value.trim()) return null;
+  if (/^P/i.test(value.trim())) return parseIsoDuration(value);
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric) : null;
+}
+
+function normalizeDate(value) {
+  const text = firstText(value);
+  if (!text) return '';
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+
+function videoIdFromUrl() {
+  try {
+    const segments = new URL(location.href).pathname.split('/').filter(Boolean);
+    const last = segments[segments.length - 1] || '';
+    const candidate = last.replace(/\.[a-z0-9]{2,5}$/i, '');
+    return /^[\w.-]{3,}$/.test(candidate) ? candidate : '';
+  } catch {
+    return '';
+  }
+}
+
+function channelFromDom() {
+  const link = document.querySelector('a[href*="/channel/"], a[href^="/@"], a[href*="/@"], [data-channel]');
+  if (!link) return { channel: '', channelId: '' };
+  const channel = normalizeVideoTitle(link.textContent);
+  const href = link.getAttribute('href') || '';
+  const match = /\/channel\/([^/?#]+)/.exec(href) || /\/@([^/?#]+)/.exec(href);
+  return { channel, channelId: match ? decodeURIComponent(match[1]) : '' };
+}
+
+function extractPageMetadata() {
+  const title = extractVideoTitle();
+  const nodes = collectJsonLd();
+  const video = nodes.find((node) => (
+    node && ['VideoObject', 'Episode', 'Clip', 'Movie', 'TVEpisode'].includes(node['@type'])
+  )) || null;
+  const author = video?.author || video?.creator || video?.publisher || video?.director || null;
+  const domChannel = channelFromDom();
+  const posterUrl = metaContent('meta[property="og:image"]')
+    || firstUrl(video?.image) || firstUrl(video?.thumbnailUrl);
+  const thumbUrl = document.querySelector('video[poster]')?.getAttribute('poster')
+    || firstUrl(video?.thumbnailUrl) || posterUrl;
+  const fanartUrl = document.querySelector('[class*="banner"] img, [class*="cover"] img, [class*="hero"] img')
+    ?.getAttribute('src') || (Array.isArray(video?.image) ? firstUrl(video.image[1]) : '') || '';
+  return {
+    title,
+    channel: firstText(author && typeof author === 'object' ? author.name : author) || domChannel.channel,
+    channelId: firstText(author && typeof author === 'object' ? author['@id'] || author.url : '')
+      || domChannel.channelId,
+    videoId: firstText(typeof video?.identifier === 'string' ? video.identifier : '')
+      || firstText(typeof video?.['@id'] === 'string' ? video['@id'] : '')
+      || videoIdFromUrl(),
+    releaseDate: normalizeDate(video?.datePublished || video?.uploadDate
+      || metaContent('meta[property="video:release_date"]')
+      || metaContent('meta[property="article:published_time"]')),
+    description: metaContent('meta[property="og:description"]')
+      || metaContent('meta[name="description"]') || firstText(video?.description),
+    posterUrl,
+    fanartUrl,
+    thumbUrl,
+    duration: parseDuration(video?.duration),
+  };
 }
 
 function ensureStyles() {

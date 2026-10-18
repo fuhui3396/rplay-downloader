@@ -15,13 +15,29 @@ import {
 import { ProgressReporter } from './progress.js';
 import { downloadFallbackTs } from './ts-fallback.js';
 import { createCdmKeyResolver } from './cdm-client.js';
+import { saveToCustomDirectory } from './fs-output.js';
+import { loadSettings } from './settings.js';
 
 let activeContext = null;
 const readyFiles = new Map();
 const cleanupPromise = cleanupStaleFiles();
 
-async function exposeReadyFile(task, temp, actualFormat, fallbackReason, context) {
+async function exposeReadyFile(task, temp, actualFormat, fallbackReason, context, settings) {
   const file = await temp.handle.getFile();
+
+  const saved = await saveToCustomDirectory(task, actualFormat, settings, file).catch(() => null);
+  if (saved) {
+    await removeTempFile(temp);
+    await chrome.runtime.sendMessage({
+      type: MessageType.OFFSCREEN_FILE_SAVED,
+      taskId: task.taskId,
+      file: { path: saved.path, size: saved.size, actualFormat },
+    });
+    // Nothing is left for the browser to download, so free the worker slot now.
+    if (activeContext === context) activeContext = null;
+    return;
+  }
+
   const mimeType = actualFormat === 'mp4' ? 'video/mp4' : 'video/mp2t';
   const filename = makeDownloadFilename(task, actualFormat);
   const namedFile = new File([file], filename, {
@@ -88,7 +104,7 @@ async function executeTask(task) {
       actualFormat === 'mp4' ? 'MP4 已生成，等待保存…' : 'TS 回退已完成，等待保存…',
       { actualFormat, fallbackReason },
     );
-    await exposeReadyFile(task, temp, actualFormat, fallbackReason, context);
+    await exposeReadyFile(task, temp, actualFormat, fallbackReason, context, await loadSettings());
   } catch (error) {
     if (activeContext === context) activeContext = null;
     if (isAbortError(error) || context.controller.signal.aborted) {
@@ -112,6 +128,24 @@ async function executeTask(task) {
 function cancelActiveTask(taskId) {
   if (!activeContext || activeContext.taskId !== taskId) return false;
   return abortDownloadContext(activeContext);
+}
+
+function writeTextFile(request) {
+  const blob = new Blob([request.content ?? ''], {
+    type: request.mimeType || 'application/xml;charset=utf-8',
+  });
+  const objectUrl = URL.createObjectURL(blob);
+  readyFiles.set(request.taskId, { objectUrl, tempName: null, filename: request.name || 'file', size: blob.size });
+  return objectUrl;
+}
+
+async function fetchMediaFile(request) {
+  const response = await fetch(request.url, { credentials: 'include' });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  readyFiles.set(request.taskId, { objectUrl, tempName: null, filename: request.name || 'file', size: blob.size });
+  return objectUrl;
 }
 
 async function releaseFile(request) {
@@ -143,6 +177,20 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       fileReady: activeContext?.fileReady || null,
     });
     return false;
+  }
+  if (request.type === MessageType.OFFSCREEN_WRITE_FILE) {
+    try {
+      sendResponse({ objectUrl: writeTextFile(request) });
+    } catch (error) {
+      sendResponse({ error: error?.message || String(error) });
+    }
+    return false;
+  }
+  if (request.type === MessageType.OFFSCREEN_FETCH_FILE) {
+    fetchMediaFile(request)
+      .then((objectUrl) => sendResponse({ objectUrl }))
+      .catch((error) => sendResponse({ error: error?.message || String(error) }));
+    return true;
   }
 
   const action = request.type === MessageType.OFFSCREEN_CANCEL
